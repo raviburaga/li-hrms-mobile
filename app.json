@@ -4,6 +4,14 @@
     "slug": "li-hrms-mobile",
     "scheme": "li-hrms",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a6df1916-5889-4ffa-a22f-ba617c936e61",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

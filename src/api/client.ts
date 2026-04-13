@@ -2,6 +2,7 @@ import axios from 'axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { redirectToLogin } from '../auth/redirectToLogin';
 import { API_BASE_URL } from '../constants/Config';
+import { showAppToast } from '../ui/toast';
 
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
@@ -24,12 +25,23 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
+        const status = error?.response?.status as number | undefined;
+
+        if (status === 401) {
+            showAppToast('Your session expired. Please sign in again.', 'error');
             void (async () => {
                 await useAuthStore.getState().logout();
                 redirectToLogin();
             })();
+            // Resolve expected auth errors so screens can handle gracefully without unhandled promise noise.
+            return Promise.resolve(error.response);
         }
+        if (status === 403) {
+            showAppToast('You do not have permission for this action.', 'error');
+            // Resolve expected permission errors so calling screens can show inline fallback states.
+            return Promise.resolve(error.response);
+        }
+
         return Promise.reject(error);
     }
 );
@@ -87,15 +99,46 @@ export const api = {
     updateProfile: (data: Record<string, unknown>) => apiClient.put<ApiEnvelope>('/users/profile', data),
 
     getEmployee: (empNo: string) => apiClient.get<ApiEnvelope>(`/employees/${empNo}`),
-    getEmployees: (params?: { is_active?: boolean; page?: number; limit?: number; search?: string }) => {
+    getEmployees: (params?: {
+        is_active?: boolean;
+        page?: number;
+        limit?: number;
+        search?: string;
+        division_id?: string;
+        department_id?: string;
+        designation_id?: string;
+        employee_group_id?: string;
+        includeLeft?: boolean;
+    }) => {
         const q = new URLSearchParams();
         if (params?.is_active != null) q.set('is_active', String(params.is_active));
         if (params?.page != null) q.set('page', String(params.page));
         if (params?.limit != null) q.set('limit', String(params.limit));
         if (params?.search) q.set('search', params.search);
+        if (params?.division_id) q.set('division_id', params.division_id);
+        if (params?.department_id) q.set('department_id', params.department_id);
+        if (params?.designation_id) q.set('designation_id', params.designation_id);
+        if (params?.employee_group_id) q.set('employee_group_id', params.employee_group_id);
+        if (params?.includeLeft != null) q.set('includeLeft', String(params.includeLeft));
         const qs = q.toString();
         return apiClient.get<ApiEnvelope>(`/employees${qs ? `?${qs}` : ''}`);
     },
+    getSetting: (key: string) => apiClient.get<ApiEnvelope<{ key: string; value: unknown }>>(`/settings/${key}`),
+    getEmployeeGroups: (isActive?: boolean) => {
+        const q = new URLSearchParams();
+        if (isActive != null) q.set('isActive', String(isActive));
+        return apiClient.get<ApiEnvelope>(`/employee-groups${q.toString() ? `?${q.toString()}` : ''}`);
+    },
+    getDivisions: (isActive?: boolean) =>
+        apiClient.get<ApiEnvelope>(`/divisions${isActive != null ? `?isActive=${String(isActive)}` : ''}`),
+    getDepartments: (isActive?: boolean) =>
+        apiClient.get<ApiEnvelope>(`/departments${isActive != null ? `?isActive=${String(isActive)}` : ''}`),
+    getAllDesignations: (isActive?: boolean) =>
+        apiClient.get<ApiEnvelope>(`/departments/designations${isActive != null ? `?isActive=${String(isActive)}` : ''}`),
+    getDesignations: (departmentId: string, isActive?: boolean) =>
+        apiClient.get<ApiEnvelope>(
+            `/departments/${departmentId}/designations${isActive != null ? `?isActive=${String(isActive)}` : ''}`
+        ),
     getResolvedDepartmentSettings: (deptId: string, type?: 'leaves' | 'loans' | 'salary_advance' | 'permissions' | 'ot' | 'overtime' | 'all', divisionId?: string) => {
         const q = new URLSearchParams();
         if (type) q.set('type', type);

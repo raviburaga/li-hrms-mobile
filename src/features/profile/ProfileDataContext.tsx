@@ -72,6 +72,7 @@ export function ProfileDataProvider({ children }: { children: ReactNode }) {
                         name?: string;
                         email?: string;
                         role?: string;
+                        profilePhoto?: string | null;
                         emp_no?: string;
                         employeeId?: string;
                         phone?: string;
@@ -89,6 +90,7 @@ export function ProfileDataProvider({ children }: { children: ReactNode }) {
                         name: u.name || '',
                         email: u.email || '',
                         role: u.role || '',
+                        profilePhoto: u.profilePhoto ?? null,
                         emp_no: u.emp_no,
                         employeeRef: u.employeeId != null ? String(u.employeeId) : undefined,
                         phone,

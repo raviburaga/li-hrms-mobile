@@ -29,6 +29,7 @@ import { useAuthStore } from '../../src/store/useAuthStore';
 import { api } from '../../src/api/client';
 import { formatTimeIST, todayYmdIST } from '../../src/utils/dateIST';
 import { SkeletonBlock, SkeletonCard } from '../../src/components/Skeleton';
+import { UpdateEnforcer } from '../../src/features/update/UpdateEnforcer';
 
 type DashboardStats = {
     totalEmployees?: number;
@@ -287,6 +288,7 @@ export default function DashboardScreen() {
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
+            <UpdateEnforcer />
 
             <SafeAreaView className="flex-1">
                 <ScrollView
