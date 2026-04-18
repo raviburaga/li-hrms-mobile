@@ -8,7 +8,6 @@ import {
     ActivityIndicator,
     Alert,
     Modal,
-    Switch,
     Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -20,9 +19,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, Camera, Image as ImageIcon, MapPin } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
+import { startOdLocationTrailBackground } from '../src/odTrail/odLocationTrailBackground';
+import { canRecordOdLocationTrail } from '../src/odTrail/odTrailEligibility';
 import { DateField, formatYmd } from '../src/components/DateField';
 
 type OdTypeOpt = { code: string; name: string; isActive?: boolean };
+type DurationMode = 'full_day' | 'half_day' | 'hours';
 
 export default function ApplyODScreen() {
     const router = useRouter();
@@ -35,16 +37,15 @@ export default function ApplyODScreen() {
     const [policyMax, setPolicyMax] = useState<Date>(() => new Date(Date.now() + 86400000 * 365));
 
     const [odType, setOdType] = useState('');
-    const [odTypeExtended, setOdTypeExtended] = useState<'full_day' | 'hours'>('full_day');
+    const [durationMode, setDurationMode] = useState<DurationMode>('full_day');
     const [odStartTime, setOdStartTime] = useState('09:00');
     const [odEndTime, setOdEndTime] = useState('18:00');
-    const [fromDate, setFromDate] = useState(() => formatYmd(new Date()));
-    const [toDate, setToDate] = useState(() => formatYmd(new Date()));
+    /** Single OD date — matches workspace web (from/to kept equal for OD). */
+    const [odDate, setOdDate] = useState(() => formatYmd(new Date()));
     const [purpose, setPurpose] = useState('');
     const [placeVisited, setPlaceVisited] = useState('');
     const [contactNumber, setContactNumber] = useState('');
     const [remarks, setRemarks] = useState('');
-    const [isHalfDay, setIsHalfDay] = useState(false);
     const [halfDayType, setHalfDayType] = useState<'first_half' | 'second_half'>('first_half');
 
     const [evidence, setEvidence] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -193,21 +194,39 @@ export default function ApplyODScreen() {
 
     const selectedTypeLabel = types.find((t) => t.code === odType)?.name || odType || 'Select type';
 
+    const hoursDurationSummary = (): { ok: boolean; minutes: number; msg?: string } => {
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(odStartTime) || !timeRegex.test(odEndTime)) {
+            return { ok: false, minutes: 0, msg: 'Use HH:MM format (e.g. 09:00).' };
+        }
+        const [sh, sm] = odStartTime.split(':').map(Number);
+        const [eh, em] = odEndTime.split(':').map(Number);
+        const startMin = sh * 60 + sm;
+        const endMin = eh * 60 + em;
+        if (endMin <= startMin) return { ok: false, minutes: 0, msg: 'End time must be after start time.' };
+        const durationMin = endMin - startMin;
+        if (durationMin > 480) return { ok: false, minutes: durationMin, msg: 'Maximum duration is 8 hours.' };
+        return { ok: true, minutes: durationMin };
+    };
+
     const onSubmit = async () => {
-        if (!odType || !fromDate || !toDate || !purpose.trim() || !placeVisited.trim()) {
-            Alert.alert('Required', 'Fill OD type, dates, place visited, and purpose.');
+        if (!odType || !odDate || !purpose.trim() || !placeVisited.trim()) {
+            Alert.alert('Required', 'Fill OD type, date, place visited, and purpose.');
             return;
         }
-        if (odTypeExtended === 'hours' && (!odStartTime || !odEndTime)) {
-            Alert.alert('Time', 'Enter start and end time for hours-based OD.');
-            return;
+        if (durationMode === 'hours') {
+            const dur = hoursDurationSummary();
+            if (!dur.ok) {
+                Alert.alert('Time', dur.msg || 'Check start and end time.');
+                return;
+            }
         }
         if (!evidence?.uri) {
-            Alert.alert('Photo', 'Attach photo evidence (required for OD).');
+            Alert.alert('Photo', 'Attach photo evidence (required for OD IN).');
             return;
         }
         if (!locationData) {
-            Alert.alert('Location', 'Capture your current location before submitting (required, same as workspace).');
+            Alert.alert('Location', 'Capture your current location before submitting (OD IN, same as workspace).');
             return;
         }
 
@@ -229,26 +248,38 @@ export default function ApplyODScreen() {
                 return;
             }
 
+            const isHalfDay = durationMode === 'half_day';
+            const odType_extended: DurationMode = durationMode;
+
+            const geoPayload = {
+                latitude: locationData.latitude,
+                longitude: locationData.longitude,
+                capturedAt: locationData.capturedAt,
+                address: locationData.address || '',
+            };
+
+            const startEvidence = {
+                photoEvidence: { url: photoUrl as string, key: photoKey },
+                geoLocation: geoPayload,
+                submittedAt: new Date().toISOString(),
+            };
+
             const payload: Record<string, unknown> = {
-                fromDate,
-                toDate,
+                fromDate: odDate,
+                toDate: odDate,
                 purpose: purpose.trim(),
                 placeVisited: placeVisited.trim(),
                 contactNumber: contactNumber.trim(),
                 remarks: remarks.trim() || undefined,
-                isHalfDay: odTypeExtended === 'hours' ? false : isHalfDay,
-                halfDayType: odTypeExtended === 'hours' ? null : isHalfDay ? halfDayType : null,
+                isHalfDay,
+                halfDayType: isHalfDay ? halfDayType : null,
                 odType,
-                odType_extended: odTypeExtended,
-                photoEvidence: { url: photoUrl, key: photoKey },
-                geoLocation: {
-                    latitude: locationData.latitude,
-                    longitude: locationData.longitude,
-                    capturedAt: locationData.capturedAt,
-                    address: locationData.address || '',
-                },
+                odType_extended,
+                startEvidence,
+                photoEvidence: startEvidence.photoEvidence,
+                geoLocation: geoPayload,
             };
-            if (odTypeExtended === 'hours') {
+            if (durationMode === 'hours') {
                 payload.odStartTime = odStartTime;
                 payload.odEndTime = odEndTime;
             }
@@ -264,9 +295,18 @@ export default function ApplyODScreen() {
             }
 
             const res = await api.applyOD(payload);
-            const body = res.data as ApiEnvelope;
+            const body = res.data as ApiEnvelope & { data?: Record<string, unknown> };
             if (body.success) {
-                Alert.alert('Success', 'On-duty request submitted.', [{ text: 'OK', onPress: () => router.back() }]);
+                const od = body.data;
+                const odId = od?._id != null ? String(od._id) : '';
+                if (odId && canRecordOdLocationTrail(od, user)) {
+                    void startOdLocationTrailBackground(odId).catch(() => {});
+                }
+                Alert.alert(
+                    'OD IN saved',
+                    'Your OD is in draft until you submit OD OUT evidence from the request details screen.',
+                    [{ text: 'OK', onPress: () => router.back() }]
+                );
             } else {
                 Alert.alert('Failed', body.message || body.error || 'Could not submit');
             }
@@ -310,41 +350,29 @@ export default function ApplyODScreen() {
                             <Text className="text-neutral-900 font-bold">{selectedTypeLabel}</Text>
                         </TouchableOpacity>
 
-                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Duration mode</Text>
-                        <View className="flex-row gap-3 mb-4">
+                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Duration type</Text>
+                        <View className="flex-row gap-2 mb-4">
                             {(
                                 [
-                                    { k: 'full_day' as const, label: 'Full / Half day' },
+                                    { k: 'full_day' as const, label: 'Full day' },
+                                    { k: 'half_day' as const, label: 'Half day' },
                                     { k: 'hours' as const, label: 'Hours' },
                                 ]
                             ).map((opt) => (
                                 <TouchableOpacity
                                     key={opt.k}
-                                    onPress={() => setOdTypeExtended(opt.k)}
-                                    className={`flex-1 py-3 rounded-2xl border-2 items-center ${odTypeExtended === opt.k ? 'border-primary bg-emerald-50' : 'border-neutral-100 bg-white'}`}
+                                    onPress={() => setDurationMode(opt.k)}
+                                    className={`flex-1 py-3 rounded-2xl border-2 items-center ${durationMode === opt.k ? 'border-primary bg-emerald-50' : 'border-neutral-100 bg-white'}`}
                                 >
-                                    <Text className="font-bold text-neutral-800 text-center text-sm">{opt.label}</Text>
+                                    <Text className="font-bold text-neutral-800 text-center text-xs">{opt.label}</Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
 
-                        <DateField label="From date" value={fromDate} onChange={setFromDate} minimumDate={policyMin} maximumDate={policyMax} />
-                        <DateField label="To date" value={toDate} onChange={setToDate} minimumDate={policyMin} maximumDate={policyMax} />
+                        <DateField label="Date *" value={odDate} onChange={setOdDate} minimumDate={policyMin} maximumDate={policyMax} />
 
-                        {odTypeExtended === 'full_day' && (
-                            <View className="flex-row items-center justify-between bg-white rounded-2xl border-2 border-neutral-100 px-4 py-3 mb-4">
-                                <Text className="text-neutral-900 font-bold">Half day</Text>
-                                <Switch
-                                    value={isHalfDay}
-                                    onValueChange={setIsHalfDay}
-                                    trackColor={{ true: '#A7F3D0' }}
-                                    thumbColor={isHalfDay ? '#10B981' : '#f4f4f5'}
-                                />
-                            </View>
-                        )}
-
-                        {odTypeExtended === 'full_day' && isHalfDay && (
-                            <View className="flex-row gap-3 mb-4">
+                        {durationMode === 'half_day' && (
+                            <View className="flex-row gap-3 mb-4 mt-2">
                                 {(['first_half', 'second_half'] as const).map((h) => (
                                     <TouchableOpacity
                                         key={h}
@@ -357,32 +385,51 @@ export default function ApplyODScreen() {
                             </View>
                         )}
 
-                        {odTypeExtended === 'hours' && (
-                            <View className="flex-row gap-3 mb-4">
-                                <View className="flex-1">
-                                    <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Start (HH:MM)</Text>
-                                    <TextInput
-                                        value={odStartTime}
-                                        onChangeText={setOdStartTime}
-                                        placeholder="09:00"
-                                        className="bg-white rounded-2xl border-2 border-neutral-100 px-4 py-3 text-neutral-900 font-bold"
-                                        placeholderTextColor="#94A3B8"
-                                    />
+                        {durationMode === 'hours' && (
+                            <>
+                                <View className="flex-row gap-3 mb-2 mt-2">
+                                    <View className="flex-1">
+                                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Start (HH:MM)</Text>
+                                        <TextInput
+                                            value={odStartTime}
+                                            onChangeText={setOdStartTime}
+                                            placeholder="09:00"
+                                            className="bg-white rounded-2xl border-2 border-neutral-100 px-4 py-3 text-neutral-900 font-bold"
+                                            placeholderTextColor="#94A3B8"
+                                        />
+                                    </View>
+                                    <View className="flex-1">
+                                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">End (HH:MM)</Text>
+                                        <TextInput
+                                            value={odEndTime}
+                                            onChangeText={setOdEndTime}
+                                            placeholder="18:00"
+                                            className="bg-white rounded-2xl border-2 border-neutral-100 px-4 py-3 text-neutral-900 font-bold"
+                                            placeholderTextColor="#94A3B8"
+                                        />
+                                    </View>
                                 </View>
-                                <View className="flex-1">
-                                    <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">End (HH:MM)</Text>
-                                    <TextInput
-                                        value={odEndTime}
-                                        onChangeText={setOdEndTime}
-                                        placeholder="18:00"
-                                        className="bg-white rounded-2xl border-2 border-neutral-100 px-4 py-3 text-neutral-900 font-bold"
-                                        placeholderTextColor="#94A3B8"
-                                    />
-                                </View>
-                            </View>
+                                {(() => {
+                                    const d = hoursDurationSummary();
+                                    if (!odStartTime || !odEndTime) return null;
+                                    if (!d.ok && d.msg) {
+                                        return <Text className="mb-4 text-xs font-medium text-rose-600">{d.msg}</Text>;
+                                    }
+                                    if (d.ok) {
+                                        const h = Math.floor(d.minutes / 60);
+                                        const m = d.minutes % 60;
+                                        return (
+                                            <Text className="mb-4 text-xs font-bold text-emerald-700">
+                                                Duration: {h}h {m}m (max 8h)
+                                            </Text>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+                            </>
                         )}
 
-                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Place visited *</Text>
+                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2 mt-1">Place visited *</Text>
                         <TextInput
                             value={placeVisited}
                             onChangeText={setPlaceVisited}
@@ -397,12 +444,12 @@ export default function ApplyODScreen() {
                         >
                             <MapPin size={20} color="#059669" strokeWidth={2.5} />
                             <Text className="ml-2 font-black text-emerald-800">
-                                {locating ? 'Getting location…' : 'Capture current location'}
+                                {locating ? 'Getting location…' : 'Capture location (OD IN)'}
                             </Text>
                         </TouchableOpacity>
                         {locationData ? (
                             <View className="mb-4 rounded-2xl border border-emerald-100 bg-white px-4 py-3">
-                                <Text className="text-[10px] font-black uppercase text-emerald-700">GPS captured</Text>
+                                <Text className="text-[10px] font-black uppercase text-emerald-700">GPS captured (OD IN)</Text>
                                 <Text className="mt-1 text-xs text-neutral-600">
                                     {locationData.latitude.toFixed(5)}, {locationData.longitude.toFixed(5)}
                                 </Text>
@@ -411,7 +458,9 @@ export default function ApplyODScreen() {
                                 ) : null}
                             </View>
                         ) : (
-                            <Text className="mb-4 text-xs font-medium text-amber-800">Location is required before submit (workspace rule).</Text>
+                            <Text className="mb-4 text-xs font-medium text-amber-800">
+                                OD IN location is required before submit (workspace rule).
+                            </Text>
                         )}
 
                         <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Purpose *</Text>
@@ -425,7 +474,7 @@ export default function ApplyODScreen() {
                             textAlignVertical="top"
                         />
 
-                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Photo evidence *</Text>
+                        <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Photo evidence (OD IN) *</Text>
                         <View className="mb-4 flex-row gap-3">
                             <TouchableOpacity
                                 onPress={pickFromLibrary}
@@ -482,7 +531,7 @@ export default function ApplyODScreen() {
                             {submitting ? (
                                 <ActivityIndicator color="white" />
                             ) : (
-                                <Text className="text-white font-black uppercase tracking-widest">Submit OD</Text>
+                                <Text className="text-white font-black uppercase tracking-widest">Submit OD IN</Text>
                             )}
                         </TouchableOpacity>
                     </ScrollView>

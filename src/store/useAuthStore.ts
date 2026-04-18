@@ -68,6 +68,12 @@ export const useAuthStore = create<AuthState>()(
             setAuth: (user, token) => set({ user, token, isAuthenticated: true }),
             setEmployee: (employee) => set({ employee }),
             logout: async () => {
+                try {
+                    const { stopOdLocationTrailBackground } = await import('../odTrail/odLocationTrailBackground');
+                    await stopOdLocationTrailBackground();
+                } catch {
+                    /* ignore */
+                }
                 set({
                     isLoggingOut: true,
                     user: null,

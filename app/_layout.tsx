@@ -6,6 +6,7 @@ import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useAuthPersistHydrated } from '../src/hooks/useAuthPersistHydrated';
+import '../src/odTrail/odLocationTrailBackground';
 import '../src/styles/global.css';
 
 function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
@@ -89,6 +90,9 @@ export default function RootLayout() {
                 <Stack.Screen name="leave/[id]" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="od/[id]" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="loan/[id]" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="apply-ot" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="apply-permission" options={{ animation: 'slide_from_right' }} />
             </Stack>
         </SafeAreaProvider>
     );

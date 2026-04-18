@@ -5,8 +5,24 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
-      "distribution": "internal"
+      "android": {
+        "distribution": "internal"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_ORIGIN": "https://hrms-appi.raviburaga.shop"
+      }
+    },
+    "development-simulator": {
+      "environment": "development",
+      "developmentClient": true,
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_ORIGIN": "https://hrms-appi.raviburaga.shop"
+      }
     },
     "preview": {
       "distribution": "internal",

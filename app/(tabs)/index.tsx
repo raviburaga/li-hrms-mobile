@@ -11,6 +11,7 @@ import {
     Calendar,
     Clock,
     Bell,
+    BellRing,
     Users,
     CheckCircle2,
     Star,
@@ -19,6 +20,7 @@ import {
     ChevronRight,
     Building2,
     Banknote,
+    Timer,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -30,6 +32,7 @@ import { api } from '../../src/api/client';
 import { formatTimeIST, todayYmdIST } from '../../src/utils/dateIST';
 import { SkeletonBlock, SkeletonCard } from '../../src/components/Skeleton';
 import { UpdateEnforcer } from '../../src/features/update/UpdateEnforcer';
+import { canViewOtPermissionsModule } from '../../src/lib/permissions';
 
 type DashboardStats = {
     totalEmployees?: number;
@@ -193,16 +196,19 @@ export default function DashboardScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState<DashboardStats>({});
     const [attendanceRow, setAttendanceRow] = useState<AttendanceDay | null>(null);
+    const [notificationUnread, setNotificationUnread] = useState(0);
 
     const userRole = user?.role || 'employee';
+    const showOtPermQuick = canViewOtPermissionsModule(user);
 
     const loadData = useCallback(async () => {
         try {
             const today = todayYmdIST();
 
-            const [statsRes, detailRes] = await Promise.all([
+            const [statsRes, detailRes, unreadRes] = await Promise.all([
                 api.getDashboardStats(),
                 empNo ? api.getAttendanceDetail(empNo, today) : Promise.resolve({ status: 404, data: {} }),
+                api.getNotificationUnreadCount(),
             ]);
 
             if (statsRes.status !== 200 || !statsRes.data?.success) {
@@ -228,9 +234,21 @@ export default function DashboardScreen() {
             } else {
                 setAttendanceRow(null);
             }
+
+            const uc = unreadRes.data as {
+                success?: boolean;
+                unreadCount?: number;
+                data?: { unreadCount?: number };
+            };
+            if (unreadRes.status === 200 && uc.success) {
+                setNotificationUnread(Number(uc.unreadCount ?? uc.data?.unreadCount ?? 0));
+            } else {
+                setNotificationUnread(0);
+            }
         } catch {
             setStats({});
             setAttendanceRow(null);
+            setNotificationUnread(0);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -307,9 +325,66 @@ export default function DashboardScreen() {
                             </Text>
                             <Text className="mt-1 text-xs font-medium text-neutral-500">Here&apos;s what&apos;s happening today</Text>
                         </View>
-                        <TouchableOpacity className="h-14 w-14 items-center justify-center rounded-2xl border border-neutral-100 bg-white shadow-sm">
-                            <Bell size={22} color="#0F172A" strokeWidth={2.5} />
-                        </TouchableOpacity>
+                        <MotiView
+                            animate={
+                                notificationUnread > 0
+                                    ? { scale: [1, 1.08, 1, 1.06, 1, 1] }
+                                    : { scale: 1 }
+                            }
+                            transition={
+                                notificationUnread > 0
+                                    ? {
+                                          type: 'timing',
+                                          duration: 1250,
+                                          loop: true,
+                                      }
+                                    : {
+                                          type: 'timing',
+                                          duration: 180,
+                                      }
+                            }
+                        >
+                            <TouchableOpacity
+                                onPress={() => router.push('/notifications')}
+                                className="relative h-14 w-14 items-center justify-center rounded-2xl border border-neutral-100 bg-white shadow-sm"
+                                accessibilityLabel="Open notifications"
+                            >
+                                <MotiView
+                                    animate={
+                                        notificationUnread > 0
+                                            ? {
+                                                  rotate: ['0deg', '8deg', '-8deg', '7deg', '-7deg', '6deg', '-6deg', '0deg'],
+                                              }
+                                            : { rotate: '0deg' }
+                                    }
+                                    transition={
+                                        notificationUnread > 0
+                                            ? {
+                                                  type: 'timing',
+                                                  duration: 260,
+                                                  loop: true,
+                                              }
+                                            : {
+                                                  type: 'timing',
+                                                  duration: 180,
+                                              }
+                                    }
+                                >
+                                    {notificationUnread > 0 ? (
+                                        <BellRing size={22} color="#0F172A" strokeWidth={2.5} />
+                                    ) : (
+                                        <Bell size={22} color="#0F172A" strokeWidth={2.5} />
+                                    )}
+                                </MotiView>
+                                {notificationUnread > 0 ? (
+                                    <View className="absolute right-1 top-1 min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 py-0.5">
+                                        <Text className="text-[10px] font-black text-white">
+                                            {notificationUnread > 99 ? '99+' : notificationUnread}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                            </TouchableOpacity>
+                        </MotiView>
                     </MotiView>
 
                     {showGlobalAttendanceCard && (
@@ -536,6 +611,16 @@ export default function DashboardScreen() {
                             bg="#ECFDF5"
                             onPress={() => router.push('/(tabs)/leaves')}
                         />
+                        {showOtPermQuick ? (
+                            <QuickLinkRow
+                                label="OT & permissions"
+                                desc="Requests, approvals, gate QR (same as web)"
+                                icon={Timer}
+                                color="#B45309"
+                                bg="#FFFBEB"
+                                onPress={() => router.push('/(tabs)/ot-permissions')}
+                            />
+                        ) : null}
                         <QuickLinkRow
                             label="Time card"
                             desc="Review daily logs (same as web)"

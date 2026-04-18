@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -8,12 +8,16 @@ import {
     Image,
     Linking,
     Platform,
+    ActivityIndicator,
+    AppState,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Calendar, Clock, MapPin, ExternalLink } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import { ChevronLeft, Calendar, Clock, MapPin, ExternalLink, Camera, Image as ImageIcon } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../../src/api/client';
 import { ApprovalTimeline, type TimelineStep } from '../../src/components/ApprovalTimeline';
 import { formatDateRangeIST, formatDateTimeIST } from '../../src/utils/dateIST';
@@ -22,6 +26,12 @@ import { canActionLeaves, isManagementRole } from '../../src/lib/permissions';
 import { canCurrentUserActOnLeaveLikeItem } from '../../src/utils/workflowPermissions';
 import { SkeletonBlock } from '../../src/components/Skeleton';
 import { EmployeeMetaCard } from '../../src/components/EmployeeMetaCard';
+import {
+    startOdLocationTrailBackground,
+    stopOdLocationTrailBackground,
+} from '../../src/odTrail/odLocationTrailBackground';
+import { canRecordOdLocationTrail, hasOdInEvidenceSubmitted } from '../../src/odTrail/odTrailEligibility';
+import { publishOdTrailPointsSocket } from '../../src/odTrail/odTrailSocket';
 
 type ChainStep = TimelineStep;
 
@@ -36,29 +46,44 @@ function openMaps(lat: number, lng: number) {
     });
 }
 
-function parseGeo(
-    row: Record<string, unknown> | null
-): { latitude: number; longitude: number; address?: string; capturedAt?: string; source: 'geoLocation' | 'exif' } | null {
+function parseGeoFields(geo: unknown): {
+    latitude: number;
+    longitude: number;
+    address?: string;
+    capturedAt?: string;
+} | null {
+    if (!geo || typeof geo !== 'object') return null;
+    const g = geo as { latitude?: number | string; longitude?: number | string; address?: string; capturedAt?: string };
+    const lat = Number(g.latitude);
+    const lng = Number(g.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return {
+        latitude: lat,
+        longitude: lng,
+        address: g.address,
+        capturedAt: g.capturedAt != null ? String(g.capturedAt) : undefined,
+    };
+}
+
+/** OD IN location: startEvidence (preferred) or legacy top-level geoLocation */
+function parseOdInGeo(row: Record<string, unknown> | null): ReturnType<typeof parseGeoFields> | null {
     if (!row) return null;
-    const geo = row.geoLocation as {
-        latitude?: number | string;
-        longitude?: number | string;
-        address?: string;
-        capturedAt?: string;
-    } | undefined;
-    if (geo != null) {
-        const lat = Number(geo.latitude);
-        const lng = Number(geo.longitude);
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            return {
-                latitude: lat,
-                longitude: lng,
-                address: geo.address,
-                capturedAt: geo.capturedAt != null ? String(geo.capturedAt) : undefined,
-                source: 'geoLocation',
-            };
-        }
-    }
+    const start = row.startEvidence as { geoLocation?: unknown } | undefined;
+    const fromStart = parseGeoFields(start?.geoLocation);
+    if (fromStart) return fromStart;
+    return parseGeoFields(row.geoLocation);
+}
+
+/** OD OUT location from endEvidence only */
+function parseOdOutGeo(row: Record<string, unknown> | null): ReturnType<typeof parseGeoFields> | null {
+    if (!row) return null;
+    const end = row.endEvidence as { geoLocation?: unknown } | undefined;
+    return parseGeoFields(end?.geoLocation);
+}
+
+/** Fallback EXIF from legacy photoEvidence when no GPS stored */
+function parseExifGeo(row: Record<string, unknown> | null): { latitude: number; longitude: number; source: 'exif' } | null {
+    if (!row) return null;
     const photo = row.photoEvidence as { exifLocation?: { latitude?: number | string; longitude?: number | string } } | undefined;
     const exif = photo?.exifLocation;
     if (exif != null) {
@@ -71,8 +96,36 @@ function parseGeo(
     return null;
 }
 
+function canSubmitOdOut(
+    od: Record<string, unknown> | null,
+    user: { _id?: string; role?: string; employeeRef?: string; employeeId?: string; emp_no?: string } | null
+): boolean {
+    if (!od || !user) return false;
+    if (String(od.status) !== 'draft') return false;
+    const end = od.endEvidence as { submittedAt?: unknown } | undefined;
+    if (end?.submittedAt) return false;
+
+    const role = String(user.role || '');
+    if (['super_admin', 'sub_admin', 'hr', 'manager', 'hod'].includes(role)) return true;
+
+    const userId = String(user._id || user.id || '').trim();
+    const appliedById = String((od.appliedBy as { _id?: string } | undefined)?._id || od.appliedBy || '').trim();
+    if (userId && appliedById && userId === appliedById) return true;
+
+    const userEmpRef = String(user.employeeRef || '').trim();
+    const odEmpId = String((od.employeeId as { _id?: string } | undefined)?._id || od.employeeId || '').trim();
+    if (userEmpRef && odEmpId && userEmpRef === odEmpId) return true;
+
+    const userEmpNo = String(user.employeeId || user.emp_no || '').trim().toLowerCase();
+    const odEmpNo = String(od.emp_no || (od.employeeId as { emp_no?: string } | undefined)?.emp_no || '').trim().toLowerCase();
+    if (userEmpNo && odEmpNo && userEmpNo === odEmpNo) return true;
+
+    return false;
+}
+
 function statusBadge(status: string): { wrap: string; text: string } {
     const s = (status || '').toLowerCase();
+    if (s === 'draft') return { wrap: 'bg-violet-100', text: 'text-violet-900' };
     if (s.includes('approv')) return { wrap: 'bg-emerald-100', text: 'text-emerald-800' };
     if (s.includes('reject')) return { wrap: 'bg-rose-100', text: 'text-rose-800' };
     if (s.includes('pending') || s.includes('progress')) return { wrap: 'bg-amber-100', text: 'text-amber-900' };
@@ -92,7 +145,22 @@ export default function ODDetailScreen() {
     const [loading, setLoading] = useState(true);
     const [row, setRow] = useState<Record<string, unknown> | null>(null);
     const [allowHigherAuthority, setAllowHigherAuthority] = useState(false);
+    const [outEvidence, setOutEvidence] = useState<ImagePicker.ImagePickerAsset | null>(null);
+    const [outLocationData, setOutLocationData] = useState<{
+        latitude: number;
+        longitude: number;
+        address?: string;
+        capturedAt: string;
+    } | null>(null);
+    const [locatingOut, setLocatingOut] = useState(false);
+    const [submittingOut, setSubmittingOut] = useState(false);
+    const [trailUsesBackground, setTrailUsesBackground] = useState(false);
     const { user } = useAuthStore();
+    const rowRef = useRef(row);
+    rowRef.current = row;
+    const userRef = useRef(user);
+    userRef.current = user;
+    const trailBgActiveRef = useRef(false);
 
     const load = useCallback(async () => {
         if (!id) return;
@@ -119,9 +187,177 @@ export default function ODDetailScreen() {
         load();
     }, [load]);
 
+    useEffect(() => {
+        trailBgActiveRef.current = false;
+        if (!id || !row || !canRecordOdLocationTrail(row, user)) {
+            setTrailUsesBackground(false);
+            void stopOdLocationTrailBackground();
+            return undefined;
+        }
+
+        const odId = String(id);
+        let cancelled = false;
+        let sub: Location.LocationSubscription | null = null;
+        let interval: ReturnType<typeof setInterval> | null = null;
+
+        const fgBuffer: Array<{ latitude: number; longitude: number; capturedAt: string; accuracy?: number | null }> = [];
+        let fgLastLat: number | null = null;
+        let fgLastLng: number | null = null;
+        let fgLastSend = 0;
+
+        const haversineM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+            const R = 6371000;
+            const toRad = (d: number) => (d * Math.PI) / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+        };
+
+        const flushFg = async () => {
+            if (fgBuffer.length === 0) return;
+            const chunk = fgBuffer.splice(0, fgBuffer.length);
+            try {
+                const pushedBySocket = await publishOdTrailPointsSocket(odId, chunk);
+                if (!pushedBySocket) {
+                    await api.appendODLocationTrail(odId, { points: chunk, client: 'mobile' });
+                }
+                setRow((prev) => {
+                    if (!prev) return prev;
+                    const merged = [
+                        ...(Array.isArray((prev as { locationTrail?: unknown[] }).locationTrail)
+                            ? (prev as { locationTrail: unknown[] }).locationTrail
+                            : []),
+                        ...chunk,
+                    ];
+                    return { ...prev, locationTrail: merged };
+                });
+            } catch {
+                /* ignore */
+            }
+        };
+
+        const startFgWatch = async () => {
+            const { status: perm } = await Location.requestForegroundPermissionsAsync();
+            if (cancelled || perm !== 'granted') return;
+            try {
+                const watcher = await Location.watchPositionAsync(
+                    {
+                        accuracy: Location.Accuracy.Balanced,
+                        distanceInterval: 35,
+                        timeInterval: 45000,
+                    },
+                    (location) => {
+                        const lat = location.coords.latitude;
+                        const lng = location.coords.longitude;
+                        const now = Date.now();
+                        let push = fgLastLat == null;
+                        if (!push && fgLastLng != null) {
+                            const dist = haversineM(fgLastLat, fgLastLng, lat, lng);
+                            if (dist >= 35 || now - fgLastSend >= 50000) push = true;
+                        }
+                        if (!push) return;
+                        fgLastLat = lat;
+                        fgLastLng = lng;
+                        fgLastSend = now;
+                        fgBuffer.push({
+                            latitude: lat,
+                            longitude: lng,
+                            capturedAt: new Date().toISOString(),
+                            accuracy: location.coords.accuracy ?? undefined,
+                        });
+                        if (fgBuffer.length >= 18) void flushFg();
+                    }
+                );
+                if (cancelled) {
+                    watcher.remove();
+                    return;
+                }
+                sub = watcher;
+            } catch {
+                /* watch failed */
+            }
+        };
+
+        const run = async () => {
+            let bg = false;
+            try {
+                bg = await startOdLocationTrailBackground(odId);
+            } catch {
+                bg = false;
+            }
+            if (cancelled) {
+                await stopOdLocationTrailBackground();
+                setTrailUsesBackground(false);
+                return;
+            }
+            trailBgActiveRef.current = bg;
+            setTrailUsesBackground(bg);
+            if (bg) {
+                interval = setInterval(() => {
+                    if (!cancelled) void load();
+                }, 60000);
+            } else {
+                interval = setInterval(() => void flushFg(), 40000);
+                await startFgWatch();
+            }
+        };
+
+        void run();
+
+        const appSub = AppState.addEventListener('change', (s) => {
+            if (s === 'active' && !cancelled) void load();
+        });
+
+        return () => {
+            cancelled = true;
+            sub?.remove();
+            if (interval) clearInterval(interval);
+            appSub.remove();
+            void flushFg();
+            const r = rowRef.current;
+            const stillEligible =
+                !!r &&
+                canRecordOdLocationTrail(r as Record<string, unknown>, userRef.current) &&
+                String((r as { _id?: string })._id || odId) === odId;
+            if (!stillEligible || !trailBgActiveRef.current) {
+                void stopOdLocationTrailBackground();
+            }
+            setTrailUsesBackground(false);
+        };
+    }, [
+        id,
+        row?.status,
+        Boolean((row?.endEvidence as { submittedAt?: unknown } | undefined)?.submittedAt),
+        hasOdInEvidenceSubmitted(row),
+        user?.id,
+        user?.employeeRef,
+        user?.emp_no,
+        user?.email,
+        user?.employeeId,
+        load,
+    ]);
+
+    const trailPointCount = useMemo(() => {
+        const t = row?.locationTrail;
+        if (!Array.isArray(t)) return 0;
+        return t.filter((p: unknown) => {
+            if (!p || typeof p !== 'object') return false;
+            const o = p as { latitude?: number; longitude?: number };
+            return Number.isFinite(Number(o.latitude)) && Number.isFinite(Number(o.longitude));
+        }).length;
+    }, [row?.locationTrail]);
+
     const status = String(row?.status ?? '');
-    const canCancel = status === 'pending' || status === 'in_progress';
+    const statusDisplay =
+        status === 'draft'
+            ? 'Draft · add OD OUT'
+            : status.replace(/_/g, ' ') || '—';
+    const canCancel = ['draft', 'pending', 'hod_approved'].includes(status);
     const canApproveReject =
+        status !== 'draft' &&
         canActionLeaves(user) &&
         !['approved', 'rejected', 'cancelled'].includes(status) &&
         canCurrentUserActOnLeaveLikeItem({
@@ -154,9 +390,145 @@ export default function ODDetailScreen() {
     const chain = ((row?.workflow as { approvalChain?: ChainStep[] } | undefined)?.approvalChain ||
         []) as ChainStep[];
 
-    const photo = row?.photoEvidence as { url?: string; exifLocation?: { latitude?: number; longitude?: number } } | undefined;
-    const photoUrl = photo?.url;
-    const geoParsed = parseGeo(row);
+    const startPhoto = (row?.startEvidence as { photoEvidence?: { url?: string } } | undefined)?.photoEvidence;
+    const legacyPhoto = row?.photoEvidence as { url?: string } | undefined;
+    const photoUrlIn = startPhoto?.url || legacyPhoto?.url;
+    const endPhoto = (row?.endEvidence as { photoEvidence?: { url?: string } } | undefined)?.photoEvidence;
+    const photoUrlOut = endPhoto?.url;
+
+    const geoIn = parseOdInGeo(row);
+    const geoOut = parseOdOutGeo(row);
+    const exifFallback = !geoIn ? parseExifGeo(row) : null;
+
+    const showOutForm = canSubmitOdOut(row, user);
+    const evidenceMinutes = row?.evidenceDurationMinutes;
+
+    const requestPhotoPermission = async () => {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        return status === 'granted';
+    };
+
+    const requestCameraPermission = async () => {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        return status === 'granted';
+    };
+
+    const pickOutFromLibrary = async () => {
+        const ok = await requestPhotoPermission();
+        if (!ok) {
+            Alert.alert('Photos', 'Allow photo library access to attach OD OUT evidence.');
+            return;
+        }
+        const res = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: false,
+            quality: 0.85,
+        });
+        if (!res.canceled && res.assets[0]) setOutEvidence(res.assets[0]);
+    };
+
+    const pickOutFromCamera = async () => {
+        const ok = await requestCameraPermission();
+        if (!ok) {
+            Alert.alert('Camera', 'Allow camera access to capture OD OUT evidence.');
+            return;
+        }
+        const res = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.85 });
+        if (!res.canceled && res.assets[0]) setOutEvidence(res.assets[0]);
+    };
+
+    const captureOutLocation = async () => {
+        setLocatingOut(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Location', 'Location permission is required for OD OUT.');
+                return;
+            }
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const { latitude, longitude } = pos.coords;
+            let address = '';
+            try {
+                const rev = await Location.reverseGeocodeAsync({ latitude, longitude });
+                const r = rev[0];
+                if (r) {
+                    address = [r.name, r.street, r.district, r.city, r.region, r.postalCode].filter(Boolean).join(', ');
+                }
+            } catch {
+                /* optional */
+            }
+            setOutLocationData({
+                latitude,
+                longitude,
+                address: address || undefined,
+                capturedAt: new Date().toISOString(),
+            });
+        } catch (e) {
+            Alert.alert('Location', e instanceof Error ? e.message : 'Could not read your location.');
+        } finally {
+            setLocatingOut(false);
+        }
+    };
+
+    const onSubmitOdOut = () => {
+        if (!outEvidence?.uri || !outLocationData) {
+            Alert.alert('OD OUT', 'Photo and GPS location are required for OD OUT.');
+            return;
+        }
+        Alert.alert('Submit OD OUT', 'This sends the request for approval (draft → pending). Continue?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Submit',
+                onPress: async () => {
+                    setSubmittingOut(true);
+                    try {
+                        const uploadRes = await api.uploadEvidence({
+                            uri: outEvidence.uri,
+                            mimeType: outEvidence.mimeType,
+                            fileName: outEvidence.fileName,
+                        });
+                        const raw = uploadRes.data as ApiEnvelope & {
+                            url?: string;
+                            key?: string;
+                            data?: { url?: string; key?: string };
+                        };
+                        const photoUrl = raw.url || raw.data?.url;
+                        const photoKey = raw.key || raw.data?.key;
+                        if (raw.success === false || !photoUrl) {
+                            Alert.alert('Upload', raw.message || raw.error || 'Could not upload photo');
+                            return;
+                        }
+                        const endEvidence = {
+                            photoEvidence: { url: photoUrl, key: photoKey },
+                            geoLocation: {
+                                latitude: outLocationData.latitude,
+                                longitude: outLocationData.longitude,
+                                capturedAt: outLocationData.capturedAt,
+                                address: outLocationData.address || '',
+                            },
+                            submittedAt: new Date().toISOString(),
+                        };
+                        const res = await api.updateOD(String(id), { endEvidence });
+                        const body = res.data as ApiEnvelope;
+                        if (body.success) {
+                            await stopOdLocationTrailBackground();
+                            setTrailUsesBackground(false);
+                            Alert.alert('Done', 'OD OUT submitted. Request is now pending approval.');
+                            setOutEvidence(null);
+                            setOutLocationData(null);
+                            await load();
+                        } else {
+                            Alert.alert('Failed', body.message || body.error || 'Could not submit OD OUT');
+                        }
+                    } catch (e) {
+                        Alert.alert('Error', e instanceof Error ? e.message : 'Network error');
+                    } finally {
+                        setSubmittingOut(false);
+                    }
+                },
+            },
+        ]);
+    };
 
     const onCancel = () => {
         Alert.alert('Withdraw application', 'Cancel this on-duty request?', [
@@ -169,6 +541,8 @@ export default function ODDetailScreen() {
                         const res = await api.cancelOD(String(id));
                         const body = res.data as ApiEnvelope;
                         if (body.success) {
+                            await stopOdLocationTrailBackground();
+                            setTrailUsesBackground(false);
                             Alert.alert('Done', 'OD request withdrawn.');
                             router.back();
                         } else Alert.alert('Failed', body.message || body.error || 'Try again');
@@ -243,15 +617,33 @@ export default function ODDetailScreen() {
                         {chain.length > 0 ? <ApprovalTimeline steps={chain} title="OD approval progress" /> : null}
 
                         <View className={`self-start px-3 py-1 rounded-full mb-4 ${b.wrap}`}>
-                            <Text className={`text-xs font-black uppercase tracking-wide ${b.text}`}>
-                                {status.replace(/_/g, ' ') || '—'}
-                            </Text>
+                            <Text className={`text-xs font-black uppercase tracking-wide ${b.text}`}>{statusDisplay}</Text>
                         </View>
+
+                        {status === 'draft' ? (
+                            <View className="mb-4 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3">
+                                <Text className="text-[10px] font-black uppercase tracking-widest text-violet-800">Next step</Text>
+                                <Text className="mt-1 text-sm font-medium leading-5 text-violet-900">
+                                    Submit OD OUT photo and location below to send this request for approval.
+                                </Text>
+                                {canRecordOdLocationTrail(row, user) ? (
+                                    <Text className="mt-2 text-[11px] font-medium leading-4 text-violet-800/90">
+                                        {trailUsesBackground
+                                            ? `Your route is recorded in the background until OD OUT (Android shows a notification). Open this screen again to refresh point counts${
+                                                  trailPointCount > 0 ? ` — ${trailPointCount} GPS points loaded` : ''
+                                              }.`
+                                            : `Your route is recorded while this screen stays open (allow “Always” location for background recording)${
+                                                  trailPointCount > 0 ? ` — ${trailPointCount} GPS points so far` : ''
+                                              }.`}
+                                    </Text>
+                                ) : null}
+                            </View>
+                        ) : null}
 
                         <View className="bg-white rounded-[28px] border-2 border-neutral-100 p-5 mb-4 shadow-sm">
                             <Text className="text-neutral-900 font-black text-lg">{String(row.odType ?? 'OD')}</Text>
                             <Text className="text-neutral-500 text-sm mt-1 font-medium">
-                                Mode: {String(row.odType_extended ?? 'full_day').replace('_', ' ')}
+                                Mode: {String(row.odType_extended ?? 'full_day').replace(/_/g, ' ')}
                             </Text>
                             {row.odType_extended === 'hours' && (row.odStartTime || row.odEndTime) ? (
                                 <Text className="text-neutral-600 text-sm mt-2">
@@ -288,79 +680,230 @@ export default function ODDetailScreen() {
                             />
                         ) : null}
 
-                        {(photoUrl || geoParsed) ? (
+                        {(photoUrlIn || geoIn || exifFallback || photoUrlOut || geoOut) ? (
                             <View className="mb-4 rounded-[28px] border-2 border-neutral-100 bg-neutral-50/80 p-4">
                                 <Text className="mb-3 text-[10px] font-black uppercase tracking-widest text-neutral-400">
-                                    Evidence & location
+                                    Evidence & locations
                                 </Text>
-                                {photoUrl ? (
-                                    <View className="mb-4 overflow-hidden rounded-2xl border border-neutral-100 bg-white">
-                                        <Text className="px-4 pt-3 pb-2 text-[10px] font-black uppercase tracking-widest text-neutral-400">
-                                            Photo evidence
+
+                                {photoUrlIn ? (
+                                    <View className="mb-4 overflow-hidden rounded-2xl border border-emerald-100 bg-white">
+                                        <Text className="px-4 pt-3 pb-2 text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                                            OD IN · Photo
                                         </Text>
                                         <Image
-                                            source={{ uri: photoUrl }}
+                                            source={{ uri: photoUrlIn }}
                                             style={{ width: '100%', height: 220 }}
                                             resizeMode="cover"
                                         />
                                     </View>
                                 ) : null}
-                                {geoParsed ? (
-                                    <View className="rounded-2xl border border-neutral-100 bg-white p-4">
+
+                                {(geoIn || exifFallback) ? (
+                                    <View className="mb-4 rounded-2xl border border-emerald-100 bg-white p-4">
                                         <View className="mb-2 flex-row items-center gap-2">
-                                            <MapPin size={18} color="#ef4444" strokeWidth={2.5} />
-                                            <Text className="text-xs font-black uppercase tracking-widest text-neutral-700">
-                                                {geoParsed.source === 'exif' ? 'Location (from photo EXIF)' : 'Live location'}
+                                            <MapPin size={18} color="#059669" strokeWidth={2.5} />
+                                            <Text className="text-xs font-black uppercase tracking-widest text-emerald-800">
+                                                OD IN · {geoIn ? 'GPS' : 'Location (photo EXIF)'}
                                             </Text>
+                                        </View>
+                                        {(() => {
+                                            const g = geoIn || exifFallback;
+                                            if (!g) return null;
+                                            return (
+                                                <>
+                                                    <View className="flex-row flex-wrap gap-x-4 gap-y-1">
+                                                        <Text className="text-xs text-neutral-600">
+                                                            <Text className="font-bold text-neutral-400">Lat: </Text>
+                                                            <Text className="font-mono">{g.latitude.toFixed(6)}</Text>
+                                                        </Text>
+                                                        <Text className="text-xs text-neutral-600">
+                                                            <Text className="font-bold text-neutral-400">Lon: </Text>
+                                                            <Text className="font-mono">{g.longitude.toFixed(6)}</Text>
+                                                        </Text>
+                                                    </View>
+                                                    {'address' in g && g.address ? (
+                                                        <View className="mt-3 border-t border-neutral-100 pt-3">
+                                                            <Text className="text-[10px] font-bold uppercase text-neutral-400">Address</Text>
+                                                            <Text className="mt-1 text-xs font-medium leading-5 text-neutral-700">{g.address}</Text>
+                                                        </View>
+                                                    ) : null}
+                                                    {'capturedAt' in g && g.capturedAt ? (
+                                                        <Text className="mt-2 text-[10px] text-neutral-500">
+                                                            Captured (IST): {formatDateTimeIST(g.capturedAt)}
+                                                        </Text>
+                                                    ) : null}
+                                                    <TouchableOpacity
+                                                        onPress={() => openMaps(g.latitude, g.longitude)}
+                                                        className="mt-3 flex-row items-center justify-center rounded-xl bg-blue-50 py-3"
+                                                    >
+                                                        <ExternalLink size={16} color="#2563eb" strokeWidth={2.5} />
+                                                        <Text className="ml-2 text-[10px] font-black uppercase tracking-wider text-blue-600">
+                                                            IN · Google Maps
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    {Platform.OS === 'ios' ? (
+                                                        <TouchableOpacity
+                                                            onPress={() => {
+                                                                Linking.openURL(
+                                                                    `http://maps.apple.com/?ll=${g.latitude},${g.longitude}&q=OD+IN`
+                                                                ).catch(() => Alert.alert('Maps', 'Could not open Apple Maps.'));
+                                                            }}
+                                                            className="mt-2 flex-row items-center justify-center rounded-xl border border-neutral-200 py-2.5"
+                                                        >
+                                                            <Text className="text-[10px] font-black uppercase tracking-wider text-neutral-700">
+                                                                IN · Apple Maps
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </>
+                                            );
+                                        })()}
+                                    </View>
+                                ) : photoUrlIn && !geoIn && !exifFallback ? (
+                                    <Text className="mb-4 text-xs text-neutral-500">No GPS coordinates for OD IN.</Text>
+                                ) : null}
+
+                                {photoUrlOut ? (
+                                    <View className="mb-4 overflow-hidden rounded-2xl border border-blue-100 bg-white">
+                                        <Text className="px-4 pt-3 pb-2 text-[10px] font-black uppercase tracking-widest text-blue-700">
+                                            OD OUT · Photo
+                                        </Text>
+                                        <Image
+                                            source={{ uri: photoUrlOut }}
+                                            style={{ width: '100%', height: 220 }}
+                                            resizeMode="cover"
+                                        />
+                                    </View>
+                                ) : null}
+
+                                {geoOut ? (
+                                    <View className="rounded-2xl border border-blue-100 bg-white p-4">
+                                        <View className="mb-2 flex-row items-center gap-2">
+                                            <MapPin size={18} color="#2563eb" strokeWidth={2.5} />
+                                            <Text className="text-xs font-black uppercase tracking-widest text-blue-800">OD OUT · GPS</Text>
                                         </View>
                                         <View className="flex-row flex-wrap gap-x-4 gap-y-1">
                                             <Text className="text-xs text-neutral-600">
                                                 <Text className="font-bold text-neutral-400">Lat: </Text>
-                                                <Text className="font-mono">{geoParsed.latitude.toFixed(6)}</Text>
+                                                <Text className="font-mono">{geoOut.latitude.toFixed(6)}</Text>
                                             </Text>
                                             <Text className="text-xs text-neutral-600">
                                                 <Text className="font-bold text-neutral-400">Lon: </Text>
-                                                <Text className="font-mono">{geoParsed.longitude.toFixed(6)}</Text>
+                                                <Text className="font-mono">{geoOut.longitude.toFixed(6)}</Text>
                                             </Text>
                                         </View>
-                                        {geoParsed.address ? (
+                                        {geoOut.address ? (
                                             <View className="mt-3 border-t border-neutral-100 pt-3">
                                                 <Text className="text-[10px] font-bold uppercase text-neutral-400">Address</Text>
-                                                <Text className="mt-1 text-xs font-medium leading-5 text-neutral-700">{geoParsed.address}</Text>
+                                                <Text className="mt-1 text-xs font-medium leading-5 text-neutral-700">{geoOut.address}</Text>
                                             </View>
                                         ) : null}
-                                        {geoParsed.capturedAt ? (
+                                        {geoOut.capturedAt ? (
                                             <Text className="mt-2 text-[10px] text-neutral-500">
-                                                Captured (IST): {formatDateTimeIST(geoParsed.capturedAt)}
+                                                Captured (IST): {formatDateTimeIST(geoOut.capturedAt)}
                                             </Text>
                                         ) : null}
                                         <TouchableOpacity
-                                            onPress={() => openMaps(geoParsed.latitude, geoParsed.longitude)}
+                                            onPress={() => openMaps(geoOut.latitude, geoOut.longitude)}
                                             className="mt-3 flex-row items-center justify-center rounded-xl bg-blue-50 py-3"
                                         >
                                             <ExternalLink size={16} color="#2563eb" strokeWidth={2.5} />
                                             <Text className="ml-2 text-[10px] font-black uppercase tracking-wider text-blue-600">
-                                                View on Google Maps
+                                                OUT · Google Maps
                                             </Text>
                                         </TouchableOpacity>
                                         {Platform.OS === 'ios' ? (
                                             <TouchableOpacity
                                                 onPress={() => {
                                                     Linking.openURL(
-                                                        `http://maps.apple.com/?ll=${geoParsed.latitude},${geoParsed.longitude}&q=Location`
+                                                        `http://maps.apple.com/?ll=${geoOut.latitude},${geoOut.longitude}&q=OD+OUT`
                                                     ).catch(() => Alert.alert('Maps', 'Could not open Apple Maps.'));
                                                 }}
                                                 className="mt-2 flex-row items-center justify-center rounded-xl border border-neutral-200 py-2.5"
                                             >
                                                 <Text className="text-[10px] font-black uppercase tracking-wider text-neutral-700">
-                                                    Open in Apple Maps
+                                                    OUT · Apple Maps
                                                 </Text>
                                             </TouchableOpacity>
                                         ) : null}
                                     </View>
-                                ) : photoUrl ? (
-                                    <Text className="text-xs text-neutral-500">No GPS coordinates stored for this request.</Text>
                                 ) : null}
+
+                                {evidenceMinutes != null && Number(evidenceMinutes) >= 0 ? (
+                                    <Text className="mt-3 text-xs font-medium text-neutral-600">
+                                        Time between IN and OUT submissions: {Number(evidenceMinutes)} min
+                                    </Text>
+                                ) : null}
+                            </View>
+                        ) : null}
+
+                        {showOutForm ? (
+                            <View className="mb-6 rounded-[28px] border-2 border-violet-200 bg-white p-5">
+                                <Text className="text-neutral-900 font-black text-lg">Submit OD OUT</Text>
+                                <Text className="mt-1 text-sm text-neutral-600 leading-5">
+                                    Upload a closing photo and capture your location (same flow as workspace web).
+                                </Text>
+                                <View className="mt-4 flex-row gap-3">
+                                    <TouchableOpacity
+                                        onPress={pickOutFromLibrary}
+                                        className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3"
+                                    >
+                                        <ImageIcon size={18} color="#0F172A" strokeWidth={2.5} />
+                                        <Text className="ml-2 text-xs font-black text-neutral-800">Gallery</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={pickOutFromCamera}
+                                        className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3"
+                                    >
+                                        <Camera size={18} color="#0F172A" strokeWidth={2.5} />
+                                        <Text className="ml-2 text-xs font-black text-neutral-800">Camera</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View className="mt-3 overflow-hidden rounded-2xl border-2 border-dashed border-neutral-200 bg-neutral-50">
+                                    {outEvidence?.uri ? (
+                                        <Image
+                                            source={{ uri: outEvidence.uri }}
+                                            style={{ width: '100%', height: 200 }}
+                                            resizeMode="cover"
+                                        />
+                                    ) : (
+                                        <View className="items-center px-4 py-8">
+                                            <Text className="text-sm font-medium text-neutral-500">OUT photo preview</Text>
+                                        </View>
+                                    )}
+                                </View>
+                                <TouchableOpacity
+                                    onPress={captureOutLocation}
+                                    disabled={locatingOut}
+                                    className="mt-4 flex-row items-center justify-center rounded-2xl border-2 border-violet-200 bg-violet-50 px-4 py-3"
+                                >
+                                    <MapPin size={20} color="#6d28d9" strokeWidth={2.5} />
+                                    <Text className="ml-2 font-black text-violet-900">
+                                        {locatingOut ? 'Getting location…' : 'Capture location (OD OUT)'}
+                                    </Text>
+                                </TouchableOpacity>
+                                {outLocationData ? (
+                                    <View className="mt-3 rounded-xl border border-violet-100 bg-white px-3 py-2">
+                                        <Text className="text-[10px] font-black uppercase text-violet-700">OUT GPS</Text>
+                                        <Text className="text-xs text-neutral-600">
+                                            {outLocationData.latitude.toFixed(5)}, {outLocationData.longitude.toFixed(5)}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                                <TouchableOpacity
+                                    onPress={onSubmitOdOut}
+                                    disabled={submittingOut}
+                                    className={`mt-5 py-4 rounded-2xl items-center ${submittingOut ? 'bg-violet-300' : 'bg-violet-600'}`}
+                                >
+                                    {submittingOut ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text className="text-white font-black uppercase tracking-widest text-xs">
+                                            Submit OD OUT & send for approval
+                                        </Text>
+                                    )}
+                                </TouchableOpacity>
                             </View>
                         ) : null}
 

@@ -62,6 +62,31 @@ export function canViewLoansModule(user: User | null | undefined): boolean {
     return canViewFeature(user, 'LOANS');
 }
 
+/** OT & Permissions workspace (same feature flag as web `OT_PERMISSIONS`). */
+export function canViewOtPermissionsModule(user: User | null | undefined): boolean {
+    if (!user) return false;
+    if (normRole(user.role) === 'super_admin') return true;
+    return canViewFeature(user, 'OT_PERMISSIONS');
+}
+
+/** POST /api/ot is limited to manager+ on the backend. */
+export function canApplyOtFromApi(user: User | null | undefined): boolean {
+    return (
+        hasAnyRole(user, ['manager', 'super_admin', 'sub_admin', 'hr', 'hod']) && canManageFeature(user, 'OT_PERMISSIONS')
+    );
+}
+
+export function canApplyPermissionFromApi(user: User | null | undefined): boolean {
+    return canManageFeature(user, 'OT_PERMISSIONS');
+}
+
+/** Approve/reject OT and permissions (backend: manager, hod, hr, sub_admin, super_admin). */
+export function canApproveOtPermissionFromApi(user: User | null | undefined): boolean {
+    return (
+        hasAnyRole(user, ['manager', 'super_admin', 'sub_admin', 'hr', 'hod']) && canManageFeature(user, 'OT_PERMISSIONS')
+    );
+}
+
 export function canViewEmployeesModule(user: User | null | undefined): boolean {
     return isManagementRole(user) && canViewFeature(user, 'EMPLOYEES');
 }

@@ -57,10 +57,17 @@ type Filter = (typeof FILTERS)[number];
 
 function statusBadge(status: string): { wrap: string; text: string } {
     const s = (status || '').toLowerCase();
+    if (s === 'draft') return { wrap: 'bg-violet-100', text: 'text-violet-900' };
     if (s.includes('approv')) return { wrap: 'bg-emerald-100', text: 'text-emerald-800' };
     if (s.includes('reject')) return { wrap: 'bg-rose-100', text: 'text-rose-800' };
     if (s.includes('pending') || s.includes('progress')) return { wrap: 'bg-amber-100', text: 'text-amber-900' };
     return { wrap: 'bg-neutral-100', text: 'text-neutral-700' };
+}
+
+function statusLabelShort(status: string, segment: 'leave' | 'od'): string {
+    const s = (status || '').toLowerCase();
+    if (segment === 'od' && s === 'draft') return 'Draft · OD OUT pending';
+    return (status || '—').replace(/_/g, ' ');
 }
 
 function nodeName(v: unknown): string {
@@ -468,7 +475,7 @@ export default function LeavesScreen() {
                                                         <Text className="text-neutral-900 font-black text-base flex-shrink">{title}</Text>
                                                         <View className={`px-2 py-0.5 rounded-full ${badge.wrap}`}>
                                                             <Text className={`text-[10px] font-black uppercase ${badge.text}`}>
-                                                                {st.replace(/_/g, ' ') || '—'}
+                                                                {statusLabelShort(st, segment)}
                                                             </Text>
                                                         </View>
                                                     </View>

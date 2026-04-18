@@ -79,6 +79,27 @@ export type LiveAttendanceEmployee = {
     isEarlyOut?: boolean;
     earlyOutMinutes?: number;
 };
+/** In-app notifications (same shape as web `InAppNotification`) */
+export type InAppNotification = {
+    _id: string;
+    title: string;
+    message: string;
+    module: string;
+    eventType: string;
+    createdAt: string;
+    isRead: boolean;
+};
+
+export type NotificationsListEnvelope = ApiEnvelope<InAppNotification[]> & {
+    total?: number;
+    page?: number;
+    totalPages?: number;
+};
+
+export type NotificationsUnreadEnvelope = ApiEnvelope & {
+    unreadCount?: number;
+};
+
 export type LiveAttendanceReportData = {
     date: string;
     summary: {
@@ -315,6 +336,26 @@ export const api = {
     applyOD: (body: Record<string, unknown>) =>
         apiClient.post<ApiEnvelope>('/leaves/od', body),
 
+    updateOD: (id: string, body: Record<string, unknown>) =>
+        apiClient.put<ApiEnvelope>(`/leaves/od/${id}`, body),
+
+    appendODLocationTrail: (
+        id: string,
+        body: {
+            points: Array<{
+                latitude: number;
+                longitude: number;
+                capturedAt?: string;
+                address?: string;
+                accuracy?: number;
+                heading?: number;
+                speed?: number;
+                source?: 'web' | 'mobile';
+            }>;
+            client?: 'web' | 'mobile';
+        }
+    ) => apiClient.post<ApiEnvelope>(`/leaves/od/${encodeURIComponent(id)}/location-trail`, body, okThrough4xx),
+
     cancelLeave: (id: string, reason?: string) =>
         apiClient.put<ApiEnvelope>(`/leaves/${id}/cancel`, { reason }),
 
@@ -439,6 +480,101 @@ export const api = {
         if (params?.shift) q.set('shift', params.shift);
         return apiClient.get<ApiEnvelope<LiveAttendanceReportData>>(`/attendance/reports/live${q.toString() ? `?${q.toString()}` : ''}`);
     },
+
+    getShifts: (isActive?: boolean) => {
+        const q = isActive != null ? `?isActive=${String(isActive)}` : '';
+        return apiClient.get<ApiEnvelope>(`/shifts${q}`);
+    },
+
+    getOTRequests: (filters?: {
+        employeeId?: string;
+        employeeNumber?: string;
+        date?: string;
+        status?: string;
+        startDate?: string;
+        endDate?: string;
+    }) => {
+        const q = new URLSearchParams();
+        if (filters?.employeeId) q.set('employeeId', filters.employeeId);
+        if (filters?.employeeNumber) q.set('employeeNumber', filters.employeeNumber);
+        if (filters?.date) q.set('date', filters.date);
+        if (filters?.status) q.set('status', filters.status);
+        if (filters?.startDate) q.set('startDate', filters.startDate);
+        if (filters?.endDate) q.set('endDate', filters.endDate);
+        const qs = q.toString();
+        return apiClient.get<ApiEnvelope>(`/ot${qs ? `?${qs}` : ''}`);
+    },
+
+    createOT: (body: Record<string, unknown>) => apiClient.post<ApiEnvelope>('/ot', body),
+
+    approveOT: (id: string) => apiClient.put<ApiEnvelope>(`/ot/${id}/approve`),
+
+    rejectOT: (id: string, reason?: string) => apiClient.put<ApiEnvelope>(`/ot/${id}/reject`, { reason }),
+
+    checkConfusedShift: (employeeNumber: string, date: string) =>
+        apiClient.get<ApiEnvelope>(
+            `/ot/check-confused/${encodeURIComponent(employeeNumber)}/${encodeURIComponent(date)}`
+        ),
+
+    getAvailableShiftsForAttendance: (employeeNumber: string, date: string) =>
+        apiClient.get<ApiEnvelope>(
+            `/attendance/${encodeURIComponent(employeeNumber)}/${encodeURIComponent(date)}/available-shifts`
+        ),
+
+    getPermissions: (filters?: {
+        employeeId?: string;
+        employeeNumber?: string;
+        date?: string;
+        status?: string;
+        startDate?: string;
+        endDate?: string;
+    }) => {
+        const q = new URLSearchParams();
+        if (filters?.employeeId) q.set('employeeId', filters.employeeId);
+        if (filters?.employeeNumber) q.set('employeeNumber', filters.employeeNumber);
+        if (filters?.date) q.set('date', filters.date);
+        if (filters?.status) q.set('status', filters.status);
+        if (filters?.startDate) q.set('startDate', filters.startDate);
+        if (filters?.endDate) q.set('endDate', filters.endDate);
+        const qs = q.toString();
+        return apiClient.get<ApiEnvelope>(`/permissions${qs ? `?${qs}` : ''}`);
+    },
+
+    createPermission: (body: Record<string, unknown>) => apiClient.post<ApiEnvelope>('/permissions', body),
+
+    approvePermission: (id: string) => apiClient.put<ApiEnvelope>(`/permissions/${id}/approve`),
+
+    rejectPermission: (id: string, reason?: string) =>
+        apiClient.put<ApiEnvelope>(`/permissions/${id}/reject`, { reason }),
+
+    getPermissionQR: (id: string) => apiClient.get<ApiEnvelope>(`/permissions/${id}/qr`),
+
+    generateGateOutQR: (permissionId: string) =>
+        apiClient.post<ApiEnvelope & { qrSecret?: string }>(`/security/gate-pass/out/${permissionId}`),
+
+    generateGateInQR: (permissionId: string) =>
+        apiClient.post<ApiEnvelope & { qrSecret?: string }>(`/security/gate-pass/in/${permissionId}`),
+
+    getOvertimeSettings: () => apiClient.get<ApiEnvelope>('/ot/settings'),
+
+    getPermissionDeductionSettings: () =>
+        apiClient.get<ApiEnvelope>('/permissions/settings/deduction'),
+
+    getNotifications: (params?: { page?: number; limit?: number; isRead?: boolean; module?: string }) => {
+        const q = new URLSearchParams();
+        if (params?.page != null) q.set('page', String(params.page));
+        if (params?.limit != null) q.set('limit', String(params.limit));
+        if (typeof params?.isRead === 'boolean') q.set('isRead', String(params.isRead));
+        if (params?.module) q.set('module', params.module);
+        const qs = q.toString();
+        return apiClient.get<NotificationsListEnvelope>(`/notifications${qs ? `?${qs}` : ''}`);
+    },
+
+    getNotificationUnreadCount: () => apiClient.get<NotificationsUnreadEnvelope>('/notifications/unread-count'),
+
+    markNotificationRead: (id: string) => apiClient.patch<ApiEnvelope>(`/notifications/${id}/read`),
+
+    markAllNotificationsRead: () => apiClient.patch<ApiEnvelope>('/notifications/read-all'),
 
     /**
      * Upload OD evidence (React Native FormData file part).

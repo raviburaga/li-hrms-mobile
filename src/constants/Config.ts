@@ -1,12 +1,16 @@
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 
-// Use the local IP address for physical device testing, or localhost for simulator
-// eas update --branch preview --message "Test home update prompt flow"  // this command is for pushing updates to the application
-// Replace with your machine's IP (e.g., '192.168.1.5') to test on a real phone s://hrms-api.raviburaga.shop
-const LOCALHOST = Platform.OS === 'android' ? ' https://hrms-api.raviburaga.shop' : 'localhost';
+/** Released app builds (EAS / store). */
+const PRODUCTION_API_ORIGIN = 'https://hrms-api.raviburaga.shop';
+/** Local backend on your machine (Expo dev, physical devices, emulators). */
+const LOCAL_DEV_API_ORIGIN = 'http://192.168.0.36:5000';
 
-export const API_BASE_URL = `${LOCALHOST}/api`;
+/** Set in `eas.json` (e.g. development profile) so device-installed dev clients use production API. Local `npx expo start` leaves this unset → `__DEV__` picks LAN. */
+const envApiOrigin = process.env.EXPO_PUBLIC_API_ORIGIN?.trim().replace(/\/$/, '');
+
+const API_ORIGIN = envApiOrigin || (__DEV__ ? LOCAL_DEV_API_ORIGIN : PRODUCTION_API_ORIGIN);
+
+export const API_BASE_URL = `${API_ORIGIN}/api`;
 
 export const CONFIG = {
     API_BASE_URL,
