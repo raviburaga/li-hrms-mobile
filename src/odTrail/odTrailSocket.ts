@@ -29,6 +29,15 @@ function getSocket(): Socket | null {
             reconnectionAttempts: 20,
             reconnectionDelay: 1000,
         });
+        socket.on('connect', () => {
+            console.log('[OD Trail] Socket connected');
+        });
+        socket.on('disconnect', (reason) => {
+            console.log('[OD Trail] Socket disconnected:', reason);
+        });
+        socket.on('connect_error', (error) => {
+            console.error('[OD Trail] Socket connection error:', error.message);
+        });
         return socket;
     }
     if (!socket.connected) {
@@ -43,7 +52,13 @@ export async function publishOdTrailPointsSocket(odId: string, points: TrailPoin
     const s = getSocket();
     if (!s) return false;
     return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            console.warn('[OD Trail] Socket publish timeout, falling back to HTTP');
+            resolve(false);
+        }, 10000); // 10 second timeout
+
         s.emit('od_trail:publish', { odId, points, client: 'mobile' }, (ack?: { success?: boolean }) => {
+            clearTimeout(timeout);
             resolve(Boolean(ack?.success));
         });
     });
