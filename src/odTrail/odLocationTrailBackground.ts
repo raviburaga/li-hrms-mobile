@@ -4,10 +4,19 @@ import * as TaskManager from 'expo-task-manager';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import { publishOdTrailPointsSocket } from './odTrailSocket';
+import { markOdTrackingActive, markOdTrackingInactive } from '../notifications/pushRegistration';
 
 export const OD_LOCATION_TRAIL_TASK = 'OD_LOCATION_TRAIL_TASK';
 
 const OD_TRAIL_OD_ID_KEY = '@lihrms/od_trail_active_od_id';
+
+export async function getActiveOdTrailId(): Promise<string | null> {
+    try {
+        return await AsyncStorage.getItem(OD_TRAIL_OD_ID_KEY);
+    } catch {
+        return null;
+    }
+}
 
 let lastLat: number | null = null;
 let lastLng: number | null = null;
@@ -153,6 +162,7 @@ export async function startOdLocationTrailBackground(odId: string): Promise<bool
                 notificationColor: '#059669',
             },
         });
+        await markOdTrackingActive(odId);
     } catch {
         await AsyncStorage.removeItem(OD_TRAIL_OD_ID_KEY);
         return false;
@@ -161,6 +171,7 @@ export async function startOdLocationTrailBackground(odId: string): Promise<bool
 }
 
 export async function stopOdLocationTrailBackground(): Promise<void> {
+    await markOdTrackingInactive();
     await flushPendingOdTrailPoints();
     try {
         await AsyncStorage.removeItem(OD_TRAIL_OD_ID_KEY);

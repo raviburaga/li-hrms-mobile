@@ -88,6 +88,8 @@ export type InAppNotification = {
     eventType: string;
     createdAt: string;
     isRead: boolean;
+    entityId?: string;
+    actionUrl?: string;
 };
 
 export type NotificationsListEnvelope = ApiEnvelope<InAppNotification[]> & {
@@ -575,6 +577,50 @@ export const api = {
     markNotificationRead: (id: string) => apiClient.patch<ApiEnvelope>(`/notifications/${id}/read`),
 
     markAllNotificationsRead: () => apiClient.patch<ApiEnvelope>('/notifications/read-all'),
+
+    subscribeExpoPush: (body: { token: string; platform?: string; deviceName?: string }) =>
+        apiClient.post<ApiEnvelope>('/notifications/push/expo-subscribe', body, okThrough4xx),
+
+    unsubscribeExpoPush: (body: { token: string }) =>
+        apiClient.post<ApiEnvelope>('/notifications/push/expo-unsubscribe', body, okThrough4xx),
+
+    getExpoPushStatus: () => apiClient.get<ApiEnvelope & { subscribed?: boolean; count?: number }>('/notifications/push/expo-status', okThrough4xx),
+
+    getPayrollRecords: (params?: {
+        month?: string;
+        employeeId?: string;
+        departmentId?: string;
+        divisionId?: string;
+        status?: string;
+        page?: number;
+        limit?: number;
+    }) => {
+        const q = new URLSearchParams();
+        if (params?.month) q.set('month', params.month);
+        if (params?.employeeId) q.set('employeeId', params.employeeId);
+        if (params?.departmentId) q.set('departmentId', params.departmentId);
+        if (params?.divisionId) q.set('divisionId', params.divisionId);
+        if (params?.status) q.set('status', params.status);
+        if (params?.page != null) q.set('page', String(params.page));
+        if (params?.limit != null) q.set('limit', String(params.limit));
+        const qs = q.toString();
+        return apiClient.get<
+            ApiEnvelope<unknown[]> & { total?: number; hasMore?: boolean; page?: number; count?: number }
+        >(`/payroll${qs ? `?${qs}` : ''}`, okThrough4xx);
+    },
+
+    getPayrollById: (payrollId: string) =>
+        apiClient.get<ApiEnvelope<Record<string, unknown>>>(`/payroll/record/${payrollId}`, okThrough4xx),
+
+    getPayrollConfig: () => apiClient.get<ApiEnvelope<{ outputColumns?: unknown[] }>>('/payroll/config', okThrough4xx),
+
+    getBirthdaysSummary: (options?: { today?: boolean; includeLeft?: boolean }) => {
+        const q = new URLSearchParams();
+        if (options?.today) q.set('today', 'true');
+        if (options?.includeLeft != null) q.set('includeLeft', String(options.includeLeft));
+        const qs = q.toString();
+        return apiClient.get<ApiEnvelope<unknown[]>>(`/employees/birthdays-summary${qs ? `?${qs}` : ''}`, okThrough4xx);
+    },
 
     /**
      * Upload OD evidence (React Native FormData file part).

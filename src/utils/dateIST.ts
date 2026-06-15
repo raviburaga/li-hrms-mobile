@@ -96,3 +96,15 @@ export function formatShortDateTimeIST(input: unknown): string {
         hour12: true,
     });
 }
+
+/** Short calendar label e.g. "15 Mar" from YYYY-MM-DD or ISO. */
+export function formatShortDateIST(input: unknown): string {
+    const raw = typeof input === 'string' ? input.trim() : input;
+    const d = toDate(typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T12:00:00+05:30` : raw);
+    if (!d) return typeof raw === 'string' ? raw : '—';
+    return d.toLocaleDateString(LOCALE, {
+        timeZone: TZ,
+        day: 'numeric',
+        month: 'short',
+    });
+}

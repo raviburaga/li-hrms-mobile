@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { LayoutDashboard, Clock, Calendar, User, Banknote, Users, Activity, Timer } from 'lucide-react-native';
+import { LayoutDashboard, Clock, Calendar, User, Banknote, Users, Activity, Timer, Receipt } from 'lucide-react-native';
 import { View, Platform, ActivityIndicator, Text } from 'react-native';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useAuthPersistHydrated } from '../../src/hooks/useAuthPersistHydrated';
@@ -8,6 +8,7 @@ import {
     canViewLeavesModule,
     canViewLoansModule,
     canViewOtPermissionsModule,
+    canViewPayslipsModule,
 } from '../../src/lib/permissions';
 
 const fill = { flex: 1 as const, backgroundColor: '#ffffff' as const };
@@ -35,6 +36,7 @@ export default function TabLayout() {
     const tabBarShown = isAuthenticated;
     const showLeaves = canViewLeavesModule(user);
     const showLoans = canViewLoansModule(user);
+    const showPayslips = canViewPayslipsModule(user);
     const showEmployees = canViewEmployeesModule(user);
     const showOtPermissions = canViewOtPermissionsModule(user);
     const isSuperAdmin = user?.role === 'super_admin';
@@ -133,6 +135,16 @@ export default function TabLayout() {
                     href: showLoans ? undefined : null,
                     tabBarIcon: ({ color, size }) => (
                         <Banknote size={size} color={color} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
+                name="payslips"
+                options={{
+                    title: 'Payslips',
+                    href: showPayslips ? undefined : null,
+                    tabBarIcon: ({ color, size }) => (
+                        <Receipt size={size} color={color} />
                     ),
                 }}
             />

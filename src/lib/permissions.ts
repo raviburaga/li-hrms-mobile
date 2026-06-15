@@ -95,13 +95,39 @@ export function canApplyLeaves(user: User | null | undefined): boolean {
     return canManageFeature(user, 'LEAVE_OD');
 }
 
+/** OD photo from gallery / saved files (not camera). Requires LEAVE_OD:file on the user. */
+export function canOdUploadFromDevice(user: User | null | undefined): boolean {
+    if (!user) return false;
+    if (normRole(user.role) === 'super_admin') return true;
+    const fc = user.featureControl;
+    if (!fc || fc.length === 0) return false;
+    return fc.includes('LEAVE_OD:file');
+}
+
 export function canApplyLoans(user: User | null | undefined): boolean {
     return canManageFeature(user, 'LOANS');
+}
+
+/** PAYSLIPS module — employees see own released payslips; scoped roles see team list on web/mobile. */
+export function canViewPayslipsModule(user: User | null | undefined): boolean {
+    return canViewFeature(user, 'PAYSLIPS');
+}
+
+/** PAYSLIPS:write or admin — view payslips for employees within data scope */
+export function canViewScopedPayslips(user: User | null | undefined): boolean {
+    if (!user) return false;
+    if (hasAnyRole(user, ['super_admin', 'sub_admin', 'hr'])) return true;
+    return canManageFeature(user, 'PAYSLIPS');
+}
+
+export function isSelfPayslipView(user: User | null | undefined): boolean {
+    return canViewPayslipsModule(user) && !canViewScopedPayslips(user);
 }
 
 export function permissionDebugSummary(user: User | null | undefined): string {
     const role = String(user?.role || 'unknown');
     const leaves = `${canViewLeavesModule(user) ? 'R' : '-'}${canApplyLeaves(user) ? 'W' : '-'}`;
     const loans = `${canViewLoansModule(user) ? 'R' : '-'}${canApplyLoans(user) ? 'W' : '-'}`;
-    return `role:${role} leaves:${leaves} loans:${loans}`;
+    const payslips = `${canViewPayslipsModule(user) ? 'R' : '-'}${canViewScopedPayslips(user) ? 'S' : ''}`;
+    return `role:${role} leaves:${leaves} loans:${loans} payslips:${payslips}`;
 }

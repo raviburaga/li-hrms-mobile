@@ -19,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, Camera, Image as ImageIcon, MapPin } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
+import { canOdUploadFromDevice } from '../src/lib/permissions';
 import { startOdLocationTrailBackground } from '../src/odTrail/odLocationTrailBackground';
 import { canRecordOdLocationTrail } from '../src/odTrail/odTrailEligibility';
 import { DateField, formatYmd } from '../src/components/DateField';
@@ -49,6 +50,8 @@ export default function ApplyODScreen() {
     const [halfDayType, setHalfDayType] = useState<'first_half' | 'second_half'>('first_half');
 
     const [evidence, setEvidence] = useState<ImagePicker.ImagePickerAsset | null>(null);
+    const [evidenceFromDeviceFile, setEvidenceFromDeviceFile] = useState(false);
+    const canUploadOdFromDevice = canOdUploadFromDevice(user);
     const [locationData, setLocationData] = useState<{
         latitude: number;
         longitude: number;
@@ -83,7 +86,10 @@ export default function ApplyODScreen() {
             allowsEditing: false,
             quality: 0.85,
         });
-        if (!res.canceled && res.assets[0]) setEvidence(res.assets[0]);
+        if (!res.canceled && res.assets[0]) {
+            setEvidence(res.assets[0]);
+            setEvidenceFromDeviceFile(true);
+        }
     };
 
     const pickFromCamera = async () => {
@@ -93,7 +99,10 @@ export default function ApplyODScreen() {
             allowsEditing: false,
             quality: 0.85,
         });
-        if (!res.canceled && res.assets[0]) setEvidence(res.assets[0]);
+        if (!res.canceled && res.assets[0]) {
+            setEvidence(res.assets[0]);
+            setEvidenceFromDeviceFile(false);
+        }
     };
 
     const captureCurrentLocation = async () => {
@@ -262,6 +271,7 @@ export default function ApplyODScreen() {
                 photoEvidence: { url: photoUrl as string, key: photoKey },
                 geoLocation: geoPayload,
                 submittedAt: new Date().toISOString(),
+                photoFromDeviceFile: evidenceFromDeviceFile,
             };
 
             const payload: Record<string, unknown> = {
@@ -475,22 +485,29 @@ export default function ApplyODScreen() {
                         />
 
                         <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">Photo evidence (OD IN) *</Text>
-                        <View className="mb-4 flex-row gap-3">
-                            <TouchableOpacity
-                                onPress={pickFromLibrary}
-                                className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-white py-3"
-                            >
-                                <ImageIcon size={18} color="#0F172A" strokeWidth={2.5} />
-                                <Text className="ml-2 text-xs font-black text-neutral-800">Gallery</Text>
-                            </TouchableOpacity>
+                        <View className={`mb-4 flex-row gap-3 ${canUploadOdFromDevice ? '' : ''}`}>
+                            {canUploadOdFromDevice ? (
+                                <TouchableOpacity
+                                    onPress={pickFromLibrary}
+                                    className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-white py-3"
+                                >
+                                    <ImageIcon size={18} color="#0F172A" strokeWidth={2.5} />
+                                    <Text className="ml-2 text-xs font-black text-neutral-800">Gallery</Text>
+                                </TouchableOpacity>
+                            ) : null}
                             <TouchableOpacity
                                 onPress={pickFromCamera}
-                                className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-white py-3"
+                                className={`${canUploadOdFromDevice ? 'flex-1' : 'w-full'} flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-white py-3`}
                             >
                                 <Camera size={18} color="#0F172A" strokeWidth={2.5} />
                                 <Text className="ml-2 text-xs font-black text-neutral-800">Camera</Text>
                             </TouchableOpacity>
                         </View>
+                        {!canUploadOdFromDevice ? (
+                            <Text className="mb-3 text-xs font-medium text-neutral-500">
+                                Gallery upload is disabled for your account. Use camera capture for OD evidence.
+                            </Text>
+                        ) : null}
                         <View className="mb-4 overflow-hidden rounded-2xl border-2 border-dashed border-neutral-200 bg-neutral-50">
                             {evidence?.uri ? (
                                 <Image

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import {
     View,
     Text,
@@ -13,7 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft } from 'lucide-react-native';
-import { api, ApiEnvelope, type InAppNotification, type NotificationsListEnvelope } from '../src/api/client';
+import { api, ApiEnvelope, type InAppNotification } from '../src/api/client';
+import { useNotificationStore } from '../src/notifications/notificationStore';
+import { openNotificationTarget } from '../src/notifications/notificationNavigation';
+import { syncBadgeCount } from '../src/notifications/pushRegistration';
 
 function formatNotificationTime(iso: string): string {
     try {
@@ -29,50 +32,39 @@ function formatNotificationTime(iso: string): string {
 
 export default function NotificationsScreen() {
     const router = useRouter();
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [items, setItems] = useState<InAppNotification[]>([]);
-    const [error, setError] = useState<string | null>(null);
+    const items = useNotificationStore((s) => s.items);
+    const loading = useNotificationStore((s) => s.loading);
+    const refreshList = useNotificationStore((s) => s.refreshList);
+    const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
+    const markReadLocal = useNotificationStore((s) => s.markReadLocal);
+    const markAllReadLocal = useNotificationStore((s) => s.markAllReadLocal);
+    const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
 
-    const load = useCallback(async (isRefresh: boolean) => {
-        if (isRefresh) setRefreshing(true);
-        else setLoading(true);
-        setError(null);
-        try {
-            const res = await api.getNotifications({ page: 1, limit: 50 });
-            const body = res.data as NotificationsListEnvelope;
-            if (res.status === 200 && body.success && Array.isArray(body.data)) {
-                setItems(body.data);
-            } else {
-                setItems([]);
-                setError(body.message || body.error || 'Could not load notifications');
-            }
-        } catch {
-            setItems([]);
-            setError('Network error');
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, []);
+    const load = useCallback(async () => {
+        await Promise.all([refreshList(), refreshUnreadCount()]);
+    }, [refreshList, refreshUnreadCount]);
 
     useFocusEffect(
         useCallback(() => {
-            void load(false);
+            void load();
         }, [load])
     );
 
     const onPressItem = async (n: InAppNotification) => {
-        if (n.isRead) return;
-        try {
-            const res = await api.markNotificationRead(n._id);
-            const body = res.data as ApiEnvelope;
-            if (res.status === 200 && body.success) {
-                setItems((prev) => prev.map((x) => (x._id === n._id ? { ...x, isRead: true } : x)));
+        if (!n.isRead) {
+            try {
+                const res = await api.markNotificationRead(n._id);
+                const body = res.data as ApiEnvelope;
+                if (res.status === 200 && body.success) {
+                    markReadLocal(n._id);
+                    await refreshUnreadCount();
+                    void syncBadgeCount(useNotificationStore.getState().unreadCount);
+                }
+            } catch {
+                /* ignore */
             }
-        } catch {
-            /* ignore */
         }
+        openNotificationTarget(n);
     };
 
     const onMarkAll = () => {
@@ -87,7 +79,9 @@ export default function NotificationsScreen() {
                         const res = await api.markAllNotificationsRead();
                         const body = res.data as ApiEnvelope;
                         if (res.status === 200 && body.success) {
-                            setItems((prev) => prev.map((x) => ({ ...x, isRead: true })));
+                            markAllReadLocal();
+                            setUnreadCount(0);
+                            await syncBadgeCount(0);
                         } else {
                             Alert.alert('Failed', body.message || body.error || 'Could not update');
                         }
@@ -125,7 +119,7 @@ export default function NotificationsScreen() {
                     </TouchableOpacity>
                 </View>
 
-                {loading && !refreshing ? (
+                {loading && items.length === 0 ? (
                     <View className="flex-1 items-center justify-center">
                         <ActivityIndicator size="large" color="#10B981" />
                     </View>
@@ -134,13 +128,12 @@ export default function NotificationsScreen() {
                         className="flex-1 px-6"
                         data={items}
                         keyExtractor={(it) => it._id}
-                        refreshControl={
-                            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor="#10B981" />
-                        }
+                        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#10B981" />}
                         ListEmptyComponent={
                             <View className="items-center py-16">
-                                <Text className="text-center text-sm font-bold text-neutral-500">
-                                    {error || 'No notifications yet.'}
+                                <Text className="text-center text-sm font-bold text-neutral-500">No notifications yet.</Text>
+                                <Text className="mt-2 px-6 text-center text-xs text-neutral-400">
+                                    Leave, OD, loan, and OT updates appear here — same as the web HRMS inbox.
                                 </Text>
                             </View>
                         }

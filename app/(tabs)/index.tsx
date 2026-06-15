@@ -21,6 +21,7 @@ import {
     Building2,
     Banknote,
     Timer,
+    Receipt,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -28,11 +29,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { useAuthStore } from '../../src/store/useAuthStore';
-import { api } from '../../src/api/client';
+import { api, ApiEnvelope } from '../../src/api/client';
 import { formatTimeIST, todayYmdIST } from '../../src/utils/dateIST';
 import { SkeletonBlock, SkeletonCard } from '../../src/components/Skeleton';
 import { UpdateEnforcer } from '../../src/features/update/UpdateEnforcer';
-import { canViewOtPermissionsModule } from '../../src/lib/permissions';
+import { canViewOtPermissionsModule, canViewPayslipsModule } from '../../src/lib/permissions';
+import { useNotificationStore } from '../../src/notifications/notificationStore';
+import { TodayBirthdayBanner, type TodayBirthdayItem } from '../../src/components/TodayBirthdayBanner';
+import {
+    HolidayCelebrationModal,
+    TodayHolidayBanner,
+    UpcomingHolidaysPanel,
+} from '../../src/components/HolidayIndicators';
+import { formatShortDateIST } from '../../src/utils/dateIST';
 
 type DashboardStats = {
     totalEmployees?: number;
@@ -41,6 +50,13 @@ type DashboardStats = {
     todayPresent?: number;
     todayAbsent?: number;
     upcomingHolidays?: number;
+    upcomingHolidaysList?: Array<{ date: string; name: string; type?: string }>;
+    nextHolidayName?: string | null;
+    nextHolidayDate?: string | null;
+    isTodayHoliday?: boolean;
+    isTodayWeekOff?: boolean;
+    todayHolidayName?: string | null;
+    todayDayType?: string;
     myPendingLeaves?: number;
     myApprovedLeaves?: number;
     teamPendingApprovals?: number;
@@ -196,20 +212,24 @@ export default function DashboardScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState<DashboardStats>({});
     const [attendanceRow, setAttendanceRow] = useState<AttendanceDay | null>(null);
-    const [notificationUnread, setNotificationUnread] = useState(0);
+    const notificationUnread = useNotificationStore((s) => s.unreadCount);
+    const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
+    const [todayBirthdayItems, setTodayBirthdayItems] = useState<TodayBirthdayItem[]>([]);
 
     const userRole = user?.role || 'employee';
     const showOtPermQuick = canViewOtPermissionsModule(user);
+    const showPayslipsQuick = canViewPayslipsModule(user);
 
     const loadData = useCallback(async () => {
         try {
             const today = todayYmdIST();
 
-            const [statsRes, detailRes, unreadRes] = await Promise.all([
+            const [statsRes, detailRes, birthdayRes] = await Promise.all([
                 api.getDashboardStats(),
                 empNo ? api.getAttendanceDetail(empNo, today) : Promise.resolve({ status: 404, data: {} }),
-                api.getNotificationUnreadCount(),
+                api.getBirthdaysSummary({ today: true, includeLeft: false }),
             ]);
+            void refreshUnreadCount();
 
             if (statsRes.status !== 200 || !statsRes.data?.success) {
                 setStats({});
@@ -235,25 +255,36 @@ export default function DashboardScreen() {
                 setAttendanceRow(null);
             }
 
-            const uc = unreadRes.data as {
-                success?: boolean;
-                unreadCount?: number;
-                data?: { unreadCount?: number };
-            };
-            if (unreadRes.status === 200 && uc.success) {
-                setNotificationUnread(Number(uc.unreadCount ?? uc.data?.unreadCount ?? 0));
+            const bBody = birthdayRes.data as ApiEnvelope<Array<Record<string, unknown>>>;
+            if (birthdayRes.status === 200 && bBody.success && Array.isArray(bBody.data)) {
+                setTodayBirthdayItems(
+                    bBody.data.map((emp) => ({
+                        id: String(emp._id || emp.emp_no || ''),
+                        name: String(emp.employee_name || emp.emp_no || 'Employee'),
+                        designationName:
+                            (typeof emp.designation_id === 'object' &&
+                                emp.designation_id &&
+                                'name' in emp.designation_id &&
+                                String((emp.designation_id as { name?: string }).name)) ||
+                            (typeof emp.designation === 'object' &&
+                                emp.designation &&
+                                'name' in emp.designation &&
+                                String((emp.designation as { name?: string }).name)) ||
+                            '—',
+                    }))
+                );
             } else {
-                setNotificationUnread(0);
+                setTodayBirthdayItems([]);
             }
         } catch {
             setStats({});
             setAttendanceRow(null);
-            setNotificationUnread(0);
+            setTodayBirthdayItems([]);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [empNo]);
+    }, [empNo, refreshUnreadCount]);
 
     useFocusEffect(
         useCallback(() => {
@@ -301,12 +332,26 @@ export default function DashboardScreen() {
     }
 
     const nonWorking = isNonWorkingCalendarDay(attendanceRow);
+    const isTodayHoliday = Boolean(stats.isTodayHoliday);
+    const isTodayWeekOff = Boolean(stats.isTodayWeekOff);
+    const nextHolName =
+        stats.nextHolidayName || (stats.upcomingHolidaysList && stats.upcomingHolidaysList[0]?.name) || null;
+    const nextHolDate =
+        stats.nextHolidayDate || (stats.upcomingHolidaysList && stats.upcomingHolidaysList[0]?.date) || null;
+    const holCount = stats.upcomingHolidays ?? stats.upcomingHolidaysList?.length ?? 0;
 
     return (
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
             <UpdateEnforcer />
+
+            {(isTodayHoliday || isTodayWeekOff) && (
+                <HolidayCelebrationModal
+                    dayType={isTodayHoliday ? 'HOLIDAY' : 'WEEK_OFF'}
+                    holidayName={stats.todayHolidayName}
+                />
+            )}
 
             <SafeAreaView className="flex-1">
                 <ScrollView
@@ -386,6 +431,15 @@ export default function DashboardScreen() {
                             </TouchableOpacity>
                         </MotiView>
                     </MotiView>
+
+                    {todayBirthdayItems.length > 0 ? <TodayBirthdayBanner items={todayBirthdayItems} /> : null}
+
+                    {(isTodayHoliday || isTodayWeekOff) ? (
+                        <TodayHolidayBanner
+                            dayType={isTodayHoliday ? 'HOLIDAY' : 'WEEK_OFF'}
+                            holidayName={stats.todayHolidayName}
+                        />
+                    ) : null}
 
                     {showGlobalAttendanceCard && (
                         <MotiView from={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="mb-8 overflow-hidden rounded-3xl">
@@ -588,15 +642,28 @@ export default function DashboardScreen() {
                                 iconBg="#ECFDF5"
                             />
                             <DashboardMetricCard
-                                title="Next holiday(s)"
-                                value={stats.upcomingHolidays ?? 0}
-                                description="Upcoming in view"
+                                title="Holidays ahead"
+                                value={nextHolName || holCount || '—'}
+                                description={
+                                    nextHolDate
+                                        ? `Next: ${formatShortDateIST(nextHolDate)} · ${holCount} in next 120d`
+                                        : 'Calendar for your division / group'
+                                }
                                 icon={Star}
                                 iconColor="#CA8A04"
                                 iconBg="#FEF9C3"
                             />
                         </View>
                     )}
+
+                    {(nextHolName || (stats.upcomingHolidaysList?.length ?? 0) > 0) ? (
+                        <UpcomingHolidaysPanel
+                            nextName={nextHolName}
+                            nextDate={nextHolDate}
+                            totalCount={holCount}
+                            items={stats.upcomingHolidaysList}
+                        />
+                    ) : null}
 
                     <View className="mb-3 flex-row items-center gap-2">
                         <LayoutDashboard size={20} color="#059669" strokeWidth={2.5} />
@@ -647,6 +714,16 @@ export default function DashboardScreen() {
                             bg="#CCFBF1"
                             onPress={() => router.push('/(tabs)/loans')}
                         />
+                        {showPayslipsQuick ? (
+                            <QuickLinkRow
+                                label="My payslips"
+                                desc="View released salary slips (same as web)"
+                                icon={Receipt}
+                                color="#047857"
+                                bg="#D1FAE5"
+                                onPress={() => router.push('/(tabs)/payslips')}
+                            />
+                        ) : null}
                         <QuickLinkRow
                             label="Profile & security"
                             desc="Account, org hierarchy, password"

@@ -22,7 +22,7 @@ import { api, ApiEnvelope } from '../../src/api/client';
 import { ApprovalTimeline, type TimelineStep } from '../../src/components/ApprovalTimeline';
 import { formatDateRangeIST, formatDateTimeIST } from '../../src/utils/dateIST';
 import { useAuthStore } from '../../src/store/useAuthStore';
-import { canActionLeaves, isManagementRole } from '../../src/lib/permissions';
+import { canActionLeaves, canOdUploadFromDevice, isManagementRole } from '../../src/lib/permissions';
 import { canCurrentUserActOnLeaveLikeItem } from '../../src/utils/workflowPermissions';
 import { SkeletonBlock } from '../../src/components/Skeleton';
 import { EmployeeMetaCard } from '../../src/components/EmployeeMetaCard';
@@ -32,6 +32,7 @@ import {
 } from '../../src/odTrail/odLocationTrailBackground';
 import { canRecordOdLocationTrail, hasOdInEvidenceSubmitted } from '../../src/odTrail/odTrailEligibility';
 import { publishOdTrailPointsSocket } from '../../src/odTrail/odTrailSocket';
+import { markOdTrackingActive } from '../../src/notifications/pushRegistration';
 
 type ChainStep = TimelineStep;
 
@@ -146,6 +147,8 @@ export default function ODDetailScreen() {
     const [row, setRow] = useState<Record<string, unknown> | null>(null);
     const [allowHigherAuthority, setAllowHigherAuthority] = useState(false);
     const [outEvidence, setOutEvidence] = useState<ImagePicker.ImagePickerAsset | null>(null);
+    const [outEvidenceFromDeviceFile, setOutEvidenceFromDeviceFile] = useState(false);
+    const canUploadOdFromDevice = canOdUploadFromDevice(user);
     const [outLocationData, setOutLocationData] = useState<{
         latitude: number;
         longitude: number;
@@ -300,6 +303,7 @@ export default function ODDetailScreen() {
                     if (!cancelled) void load();
                 }, 60000);
             } else {
+                await markOdTrackingActive(odId);
                 interval = setInterval(() => void flushFg(), 40000);
                 await startFgWatch();
             }
@@ -424,7 +428,10 @@ export default function ODDetailScreen() {
             allowsEditing: false,
             quality: 0.85,
         });
-        if (!res.canceled && res.assets[0]) setOutEvidence(res.assets[0]);
+        if (!res.canceled && res.assets[0]) {
+            setOutEvidence(res.assets[0]);
+            setOutEvidenceFromDeviceFile(true);
+        }
     };
 
     const pickOutFromCamera = async () => {
@@ -434,7 +441,10 @@ export default function ODDetailScreen() {
             return;
         }
         const res = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.85 });
-        if (!res.canceled && res.assets[0]) setOutEvidence(res.assets[0]);
+        if (!res.canceled && res.assets[0]) {
+            setOutEvidence(res.assets[0]);
+            setOutEvidenceFromDeviceFile(false);
+        }
     };
 
     const captureOutLocation = async () => {
@@ -507,6 +517,7 @@ export default function ODDetailScreen() {
                                 address: outLocationData.address || '',
                             },
                             submittedAt: new Date().toISOString(),
+                            photoFromDeviceFile: outEvidenceFromDeviceFile,
                         };
                         const res = await api.updateOD(String(id), { endEvidence });
                         const body = res.data as ApiEnvelope;
@@ -516,6 +527,7 @@ export default function ODDetailScreen() {
                             Alert.alert('Done', 'OD OUT submitted. Request is now pending approval.');
                             setOutEvidence(null);
                             setOutLocationData(null);
+                            setOutEvidenceFromDeviceFile(false);
                             await load();
                         } else {
                             Alert.alert('Failed', body.message || body.error || 'Could not submit OD OUT');
@@ -845,21 +857,28 @@ export default function ODDetailScreen() {
                                     Upload a closing photo and capture your location (same flow as workspace web).
                                 </Text>
                                 <View className="mt-4 flex-row gap-3">
-                                    <TouchableOpacity
-                                        onPress={pickOutFromLibrary}
-                                        className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3"
-                                    >
-                                        <ImageIcon size={18} color="#0F172A" strokeWidth={2.5} />
-                                        <Text className="ml-2 text-xs font-black text-neutral-800">Gallery</Text>
-                                    </TouchableOpacity>
+                                    {canUploadOdFromDevice ? (
+                                        <TouchableOpacity
+                                            onPress={pickOutFromLibrary}
+                                            className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3"
+                                        >
+                                            <ImageIcon size={18} color="#0F172A" strokeWidth={2.5} />
+                                            <Text className="ml-2 text-xs font-black text-neutral-800">Gallery</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
                                     <TouchableOpacity
                                         onPress={pickOutFromCamera}
-                                        className="flex-1 flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3"
+                                        className={`${canUploadOdFromDevice ? 'flex-1' : 'w-full'} flex-row items-center justify-center rounded-2xl border-2 border-neutral-200 bg-neutral-50 py-3`}
                                     >
                                         <Camera size={18} color="#0F172A" strokeWidth={2.5} />
                                         <Text className="ml-2 text-xs font-black text-neutral-800">Camera</Text>
                                     </TouchableOpacity>
                                 </View>
+                                {!canUploadOdFromDevice ? (
+                                    <Text className="mt-2 text-xs font-medium text-neutral-500">
+                                        Gallery upload is disabled for your account. Use camera capture for OD OUT evidence.
+                                    </Text>
+                                ) : null}
                                 <View className="mt-3 overflow-hidden rounded-2xl border-2 border-dashed border-neutral-200 bg-neutral-50">
                                     {outEvidence?.uri ? (
                                         <Image
