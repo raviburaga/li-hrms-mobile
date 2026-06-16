@@ -16,6 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
+import { canApplyLoans } from '../src/lib/permissions';
+import { ApplyWriteGate } from '../src/components/ApplyWriteGate';
 
 type EmployeeOpt = {
     _id?: string;
@@ -241,6 +243,7 @@ export default function ApplyLoanScreen() {
     };
 
     return (
+        <ApplyWriteGate allowed={canApplyLoans(user)} moduleLabel="apply loan or salary advance">
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
@@ -418,5 +421,6 @@ export default function ApplyLoanScreen() {
                 </Modal>
             </SafeAreaView>
         </View>
+        </ApplyWriteGate>
     );
 }

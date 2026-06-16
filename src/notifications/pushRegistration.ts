@@ -1,27 +1,15 @@
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { api } from '../api/client';
+import { isNativePushAvailable, loadNotificationsModule } from './pushEnvironment';
 
 let lastRegisteredToken: string | null = null;
 
-Notifications.setNotificationHandler({
-    handleNotification: async (notification) => {
-        const data = notification.request.content.data as { type?: string } | undefined;
-        const isOdTracking = data?.type === 'od_tracking';
-        return {
-            shouldShowAlert: !isOdTracking,
-            shouldShowBanner: !isOdTracking,
-            shouldShowList: true,
-            shouldPlaySound: !isOdTracking,
-            shouldSetBadge: !isOdTracking,
-        };
-    },
-});
-
 export async function ensureNotificationChannels(): Promise<void> {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || !isNativePushAvailable()) return;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
     await Notifications.setNotificationChannelAsync('hrms-default', {
         name: 'HRMS alerts',
         importance: Notifications.AndroidImportance.DEFAULT,
@@ -39,7 +27,9 @@ export async function ensureNotificationChannels(): Promise<void> {
 }
 
 export async function requestNotificationPermissions(): Promise<boolean> {
-    if (!Device.isDevice) return false;
+    if (!Device.isDevice || !isNativePushAvailable()) return false;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return false;
     await ensureNotificationChannels();
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return true;
@@ -50,7 +40,9 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 export async function registerExpoPushToken(): Promise<string | null> {
-    if (!Device.isDevice) return null;
+    if (!Device.isDevice || !isNativePushAvailable()) return null;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return null;
     const granted = await requestNotificationPermissions();
     if (!granted) return null;
 
@@ -91,6 +83,9 @@ export async function unregisterExpoPushToken(): Promise<void> {
 export const OD_TRACKING_NOTIFICATION_ID = 'hrms-od-location-trail';
 
 export async function presentOdTrackingNotification(odLabel?: string): Promise<void> {
+    if (!isNativePushAvailable()) return;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
     await ensureNotificationChannels();
     await Notifications.scheduleNotificationAsync({
         identifier: OD_TRACKING_NOTIFICATION_ID,
@@ -111,6 +106,9 @@ export async function presentOdTrackingNotification(odLabel?: string): Promise<v
 }
 
 export async function dismissOdTrackingNotification(): Promise<void> {
+    if (!isNativePushAvailable()) return;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
     try {
         await Notifications.dismissNotificationAsync(OD_TRACKING_NOTIFICATION_ID);
     } catch {
@@ -136,6 +134,9 @@ export async function presentLocalAppNotification(input: {
     message: string;
     data?: Record<string, unknown>;
 }): Promise<void> {
+    if (!isNativePushAvailable()) return;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
     await ensureNotificationChannels();
     await Notifications.scheduleNotificationAsync({
         content: {
@@ -149,6 +150,9 @@ export async function presentLocalAppNotification(input: {
 }
 
 export async function syncBadgeCount(count: number): Promise<void> {
+    if (!isNativePushAvailable()) return;
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return;
     try {
         await Notifications.setBadgeCountAsync(Math.max(0, count));
     } catch {

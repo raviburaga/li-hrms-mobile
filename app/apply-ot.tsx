@@ -18,6 +18,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { todayYmdIST } from '../src/utils/dateIST';
 import { DateField } from '../src/components/DateField';
 import { canApplyOtFromApi } from '../src/lib/permissions';
+import { ApplyWriteGate } from '../src/components/ApplyWriteGate';
 
 type ConfusedPayload = {
     requiresManualSelection?: boolean;
@@ -238,24 +239,8 @@ export default function ApplyOTScreen() {
         }
     };
 
-    if (!allowed) {
-        return (
-            <View className="flex-1 bg-white px-6 pt-4">
-                <StatusBar style="dark" />
-                <TouchableOpacity onPress={() => router.back()} className="mb-4 flex-row items-center gap-2">
-                    <ChevronLeft size={22} color="#0F172A" />
-                    <Text className="font-bold text-neutral-700">Back</Text>
-                </TouchableOpacity>
-                <Text className="text-lg font-black text-neutral-900">Apply OT</Text>
-                <Text className="mt-2 text-sm text-neutral-500">
-                    OT requests are created by manager, HOD, or HR in this organisation. If you need overtime logged, ask
-                    your reporting manager.
-                </Text>
-            </View>
-        );
-    }
-
     return (
+        <ApplyWriteGate allowed={allowed} moduleLabel="apply OT">
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
@@ -342,5 +327,6 @@ export default function ApplyOTScreen() {
                 </ScrollView>
             </SafeAreaView>
         </View>
+        </ApplyWriteGate>
     );
 }

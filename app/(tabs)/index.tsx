@@ -4,6 +4,7 @@ import {
     ScrollView,
     TouchableOpacity,
     RefreshControl,
+    Alert,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -22,6 +23,7 @@ import {
     Banknote,
     Timer,
     Receipt,
+    LogOut,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -33,7 +35,16 @@ import { api, ApiEnvelope } from '../../src/api/client';
 import { formatTimeIST, todayYmdIST } from '../../src/utils/dateIST';
 import { SkeletonBlock, SkeletonCard } from '../../src/components/Skeleton';
 import { UpdateEnforcer } from '../../src/features/update/UpdateEnforcer';
-import { canViewOtPermissionsModule, canViewPayslipsModule } from '../../src/lib/permissions';
+import {
+    canViewAttendanceModule,
+    canViewDashboardModule,
+    canViewLeavesModule,
+    canViewLoansModule,
+    canViewOtPermissionsModule,
+    canViewPayslipsModule,
+    canViewProfileModule,
+} from '../../src/lib/permissions';
+import { ModuleAccessDenied } from '../../src/components/ModuleAccessDenied';
 import { useNotificationStore } from '../../src/notifications/notificationStore';
 import { TodayBirthdayBanner, type TodayBirthdayItem } from '../../src/components/TodayBirthdayBanner';
 import {
@@ -205,7 +216,7 @@ function QuickLinkRow({
 
 export default function DashboardScreen() {
     const router = useRouter();
-    const { user } = useAuthStore();
+    const { user, logout } = useAuthStore();
     const empNo = (user?.emp_no || '').trim().toUpperCase();
 
     const [loading, setLoading] = useState(true);
@@ -219,6 +230,23 @@ export default function DashboardScreen() {
     const userRole = user?.role || 'employee';
     const showOtPermQuick = canViewOtPermissionsModule(user);
     const showPayslipsQuick = canViewPayslipsModule(user);
+    const showLeavesQuick = canViewLeavesModule(user);
+    const showAttendanceQuick = canViewAttendanceModule(user);
+    const showLoansQuick = canViewLoansModule(user);
+    const showProfileQuick = canViewProfileModule(user);
+
+    const handleLogout = () => {
+        Alert.alert('Sign Out', 'Are you sure you want to log out?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Log Out',
+                style: 'destructive',
+                onPress: () => {
+                    void logout();
+                },
+            },
+        ]);
+    };
 
     const loadData = useCallback(async () => {
         try {
@@ -329,6 +357,10 @@ export default function DashboardScreen() {
                 </View>
             </View>
         );
+    }
+
+    if (!canViewDashboardModule(user)) {
+        return <ModuleAccessDenied moduleLabel="Dashboard" />;
     }
 
     const nonWorking = isNonWorkingCalendarDay(attendanceRow);
@@ -670,14 +702,16 @@ export default function DashboardScreen() {
                         <Text className="text-base font-black text-neutral-900">My portal</Text>
                     </View>
                     <View className="mb-24 rounded-3xl border border-neutral-100 bg-white/80 p-4">
-                        <QuickLinkRow
-                            label="Apply absence"
-                            desc="Leave or OD request"
-                            icon={Calendar}
-                            color="#059669"
-                            bg="#ECFDF5"
-                            onPress={() => router.push('/(tabs)/leaves')}
-                        />
+                        {showLeavesQuick ? (
+                            <QuickLinkRow
+                                label="Apply absence"
+                                desc="Leave or OD request"
+                                icon={Calendar}
+                                color="#059669"
+                                bg="#ECFDF5"
+                                onPress={() => router.push('/(tabs)/leaves')}
+                            />
+                        ) : null}
                         {showOtPermQuick ? (
                             <QuickLinkRow
                                 label="OT & permissions"
@@ -688,15 +722,17 @@ export default function DashboardScreen() {
                                 onPress={() => router.push('/(tabs)/ot-permissions')}
                             />
                         ) : null}
-                        <QuickLinkRow
-                            label="Time card"
-                            desc="Review daily logs (same as web)"
-                            icon={Clock}
-                            color="#047857"
-                            bg="#D1FAE5"
-                            onPress={() => router.push('/(tabs)/attendance')}
-                        />
-                        {(userRole === 'hr' || userRole === 'super_admin' || userRole === 'sub_admin') && (
+                        {showAttendanceQuick ? (
+                            <QuickLinkRow
+                                label="Time card"
+                                desc="Review daily logs (same as web)"
+                                icon={Clock}
+                                color="#047857"
+                                bg="#D1FAE5"
+                                onPress={() => router.push('/(tabs)/attendance')}
+                            />
+                        ) : null}
+                        {(userRole === 'hr' || userRole === 'super_admin' || userRole === 'sub_admin') && showProfileQuick ? (
                             <QuickLinkRow
                                 label="Workspace focus"
                                 desc="HRMS web for full directory & payroll"
@@ -705,15 +741,17 @@ export default function DashboardScreen() {
                                 bg="#CCFBF1"
                                 onPress={() => router.push('/(tabs)/profile')}
                             />
-                        )}
-                        <QuickLinkRow
-                            label="Loans & advances"
-                            desc="Apply and track finance requests"
-                            icon={Banknote}
-                            color="#0F766E"
-                            bg="#CCFBF1"
-                            onPress={() => router.push('/(tabs)/loans')}
-                        />
+                        ) : null}
+                        {showLoansQuick ? (
+                            <QuickLinkRow
+                                label="Loans & advances"
+                                desc="Apply and track finance requests"
+                                icon={Banknote}
+                                color="#0F766E"
+                                bg="#CCFBF1"
+                                onPress={() => router.push('/(tabs)/loans')}
+                            />
+                        ) : null}
                         {showPayslipsQuick ? (
                             <QuickLinkRow
                                 label="My payslips"
@@ -724,14 +762,25 @@ export default function DashboardScreen() {
                                 onPress={() => router.push('/(tabs)/payslips')}
                             />
                         ) : null}
-                        <QuickLinkRow
-                            label="Profile & security"
-                            desc="Account, org hierarchy, password"
-                            icon={User}
-                            color="#0D9488"
-                            bg="#CCFBF1"
-                            onPress={() => router.push('/(tabs)/profile')}
-                        />
+                        {showProfileQuick ? (
+                            <QuickLinkRow
+                                label="Profile & security"
+                                desc="Account, org hierarchy, password"
+                                icon={User}
+                                color="#0D9488"
+                                bg="#CCFBF1"
+                                onPress={() => router.push('/(tabs)/profile')}
+                            />
+                        ) : (
+                            <QuickLinkRow
+                                label="Sign out"
+                                desc="End your session"
+                                icon={LogOut}
+                                color="#BE123C"
+                                bg="#FFE4E6"
+                                onPress={handleLogout}
+                            />
+                        )}
                     </View>
                 </ScrollView>
             </SafeAreaView>

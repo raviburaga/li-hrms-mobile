@@ -18,6 +18,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { todayYmdIST } from '../src/utils/dateIST';
 import { DateField } from '../src/components/DateField';
 import { canApplyPermissionFromApi } from '../src/lib/permissions';
+import { ApplyWriteGate } from '../src/components/ApplyWriteGate';
 
 function normEmp(s: string): string {
     return s.trim().toUpperCase();
@@ -223,23 +224,8 @@ export default function ApplyPermissionScreen() {
         }
     };
 
-    if (!allowed) {
-        return (
-            <View className="flex-1 bg-white px-6 pt-4">
-                <StatusBar style="dark" />
-                <TouchableOpacity onPress={() => router.back()} className="mb-4 flex-row items-center gap-2">
-                    <ChevronLeft size={22} color="#0F172A" />
-                    <Text className="font-bold text-neutral-700">Back</Text>
-                </TouchableOpacity>
-                <Text className="text-lg font-black text-neutral-900">Apply permission</Text>
-                <Text className="mt-2 text-sm text-neutral-500">
-                    You do not have permission to raise permission requests in this workspace.
-                </Text>
-            </View>
-        );
-    }
-
     return (
+        <ApplyWriteGate allowed={allowed} moduleLabel="apply permission">
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
@@ -352,5 +338,6 @@ export default function ApplyPermissionScreen() {
                 </ScrollView>
             </SafeAreaView>
         </View>
+        </ApplyWriteGate>
     );
 }

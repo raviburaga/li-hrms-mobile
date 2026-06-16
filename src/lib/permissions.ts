@@ -20,6 +20,7 @@ function hasAnyRole(user: User | null | undefined, roles: AppRole[]): boolean {
     return role !== 'unknown' && roles.includes(role);
 }
 
+/** Match web: allow read when featureControl empty (legacy); accept module, :read, or :write. */
 function canViewFeature(user: User | null | undefined, featureCode: string): boolean {
     if (!user) return false;
     const fc = user.featureControl;
@@ -27,11 +28,30 @@ function canViewFeature(user: User | null | undefined, featureCode: string): boo
     return fc.includes(featureCode) || fc.includes(`${featureCode}:read`) || fc.includes(`${featureCode}:write`);
 }
 
+/** Match web: hide write until featureControl is resolved (empty = no write). */
 function canManageFeature(user: User | null | undefined, featureCode: string): boolean {
     if (!user) return false;
     const fc = user.featureControl;
-    if (!fc || fc.length === 0) return true;
+    if (!fc || fc.length === 0) return false;
     return fc.includes(featureCode) || fc.includes(`${featureCode}:write`);
+}
+
+export function canViewDashboardModule(user: User | null | undefined): boolean {
+    return canViewFeature(user, 'DASHBOARD');
+}
+
+export function canViewAttendanceModule(user: User | null | undefined): boolean {
+    return canViewFeature(user, 'ATTENDANCE');
+}
+
+export function canViewLiveAttendanceModule(user: User | null | undefined): boolean {
+    if (!user) return false;
+    if (normRole(user.role) === 'super_admin') return true;
+    return canViewFeature(user, 'LIVE_ATTENDANCE');
+}
+
+export function canViewProfileModule(user: User | null | undefined): boolean {
+    return canViewFeature(user, 'PROFILE');
 }
 
 export function canViewTeamLeaves(user: User | null | undefined): boolean {
@@ -58,8 +78,13 @@ export function canViewLeavesModule(user: User | null | undefined): boolean {
     return canViewFeature(user, 'LEAVE_OD');
 }
 
+/** Match web workspace roles for loans module visibility. */
 export function canViewLoansModule(user: User | null | undefined): boolean {
-    return canViewFeature(user, 'LOANS');
+    if (!user) return false;
+    if (normRole(user.role) === 'super_admin') return canViewFeature(user, 'LOANS');
+    return (
+        hasAnyRole(user, ['sub_admin', 'hr', 'manager', 'employee']) && canViewFeature(user, 'LOANS')
+    );
 }
 
 /** OT & Permissions workspace (same feature flag as web `OT_PERMISSIONS`). */
@@ -87,8 +112,13 @@ export function canApproveOtPermissionFromApi(user: User | null | undefined): bo
     );
 }
 
+/** Match web: any role with EMPLOYEES:read (not management-only). */
 export function canViewEmployeesModule(user: User | null | undefined): boolean {
-    return isManagementRole(user) && canViewFeature(user, 'EMPLOYEES');
+    if (!user) return false;
+    if (normRole(user.role) === 'super_admin') return true;
+    return (
+        hasAnyRole(user, ['sub_admin', 'hr', 'hod', 'manager', 'employee']) && canViewFeature(user, 'EMPLOYEES')
+    );
 }
 
 export function canApplyLeaves(user: User | null | undefined): boolean {

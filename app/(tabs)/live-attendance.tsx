@@ -7,6 +7,8 @@ import { Activity, Clock3, CheckCircle2, Users, Funnel, CalendarDays } from 'luc
 import { useFocusEffect } from 'expo-router';
 import { api, type LiveAttendanceFilterOption, type LiveAttendanceReportData } from '../../src/api/client';
 import { useAuthStore } from '../../src/store/useAuthStore';
+import { canViewLiveAttendanceModule } from '../../src/lib/permissions';
+import { ModuleAccessDenied } from '../../src/components/ModuleAccessDenied';
 import { SkeletonCard } from '../../src/components/Skeleton';
 
 function ymd(d: Date) {
@@ -30,7 +32,7 @@ function formatHours(h?: number) {
 
 export default function LiveAttendanceScreen() {
     const user = useAuthStore((s) => s.user);
-    const isSuperAdmin = user?.role === 'super_admin';
+    const canViewModule = canViewLiveAttendanceModule(user);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -81,12 +83,8 @@ export default function LiveAttendanceScreen() {
         return () => clearInterval(t);
     }, [load]);
 
-    if (!isSuperAdmin) {
-        return (
-            <View className="flex-1 items-center justify-center bg-white px-8">
-                <Text className="text-center font-semibold text-neutral-700">This screen is available only for Super Admin.</Text>
-            </View>
-        );
+    if (!canViewModule) {
+        return <ModuleAccessDenied moduleLabel="Live Attendance" />;
     }
 
     return (

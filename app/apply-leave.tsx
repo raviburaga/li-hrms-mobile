@@ -17,6 +17,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
+import { canApplyLeaves } from '../src/lib/permissions';
+import { ApplyWriteGate } from '../src/components/ApplyWriteGate';
 import { DateField, formatYmd } from '../src/components/DateField';
 
 type LeaveTypeOpt = { code: string; name: string; isActive?: boolean };
@@ -140,6 +142,7 @@ export default function ApplyLeaveScreen() {
     };
 
     return (
+        <ApplyWriteGate allowed={canApplyLeaves(user)} moduleLabel="apply leave">
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
@@ -260,5 +263,6 @@ export default function ApplyLeaveScreen() {
                 </Modal>
             </SafeAreaView>
         </View>
+        </ApplyWriteGate>
     );
 }

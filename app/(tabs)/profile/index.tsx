@@ -5,6 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../../src/store/useAuthStore';
+import { canViewProfileModule } from '../../../src/lib/permissions';
+import { ModuleAccessDenied } from '../../../src/components/ModuleAccessDenied';
 import { useProfileData } from '../../../src/features/profile/ProfileDataContext';
 import { ProfileHero } from '../../../src/features/profile/ProfileHero';
 import { ProfileContactSection } from '../../../src/features/profile/ProfileContactSection';
@@ -13,6 +15,7 @@ export default function ProfileIndexScreen() {
     const router = useRouter();
     const { user, logout } = useAuthStore();
     const { loading } = useProfileData();
+    const canViewModule = canViewProfileModule(user);
 
     const handleLogout = () => {
         Alert.alert('Sign Out', 'Are you sure you want to log out?', [
@@ -26,6 +29,10 @@ export default function ProfileIndexScreen() {
             },
         ]);
     };
+
+    if (!canViewModule) {
+        return <ModuleAccessDenied moduleLabel="Profile" />;
+    }
 
     if (loading && !user) {
         return (

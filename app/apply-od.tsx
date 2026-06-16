@@ -19,7 +19,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, Camera, Image as ImageIcon, MapPin } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
-import { canOdUploadFromDevice } from '../src/lib/permissions';
+import { canApplyLeaves, canOdUploadFromDevice } from '../src/lib/permissions';
+import { ApplyWriteGate } from '../src/components/ApplyWriteGate';
 import { startOdLocationTrailBackground } from '../src/odTrail/odLocationTrailBackground';
 import { canRecordOdLocationTrail } from '../src/odTrail/odTrailEligibility';
 import { DateField, formatYmd } from '../src/components/DateField';
@@ -329,6 +330,7 @@ export default function ApplyODScreen() {
     };
 
     return (
+        <ApplyWriteGate allowed={canApplyLeaves(user)} moduleLabel="apply OD">
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <LinearGradient colors={['#FFFFFE', '#F7FEE7', '#FFFFFF']} className="absolute inset-0" />
@@ -578,5 +580,6 @@ export default function ApplyODScreen() {
                 </Modal>
             </SafeAreaView>
         </View>
+        </ApplyWriteGate>
     );
 }

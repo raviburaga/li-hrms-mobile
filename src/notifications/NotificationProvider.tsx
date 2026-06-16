@@ -1,6 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import { getAppSocket, disconnectAppSocket } from '../lib/appSocket';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAuthPersistHydrated } from '../hooks/useAuthPersistHydrated';
@@ -15,6 +14,7 @@ import {
     presentLocalAppNotification,
 } from './pushRegistration';
 import { openNotificationTarget } from './notificationNavigation';
+import { isNativePushAvailable, loadNotificationsModule } from './pushEnvironment';
 import { showAppToast } from '../ui/toast';
 import { getActiveOdTrailId } from '../odTrail/odLocationTrailBackground';
 
@@ -129,7 +129,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }, [hydrated, isAuthenticated, isLoggingOut, userId, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
 
     useEffect(() => {
-        const openFromResponse = (response: Notifications.NotificationResponse | null) => {
+        if (!isNativePushAvailable()) return undefined;
+
+        let cancelled = false;
+        let sub: { remove: () => void } | undefined;
+
+        const openFromResponse = (response: import('expo-notifications').NotificationResponse | null) => {
             if (!response) return;
             const data = response.notification.request.content.data as {
                 type?: string;
@@ -153,9 +158,18 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             });
         };
 
-        const sub = Notifications.addNotificationResponseReceivedListener(openFromResponse);
-        void Notifications.getLastNotificationResponseAsync().then(openFromResponse);
-        return () => sub.remove();
+        void (async () => {
+            const Notifications = await loadNotificationsModule();
+            if (!Notifications || cancelled) return;
+            sub = Notifications.addNotificationResponseReceivedListener(openFromResponse);
+            const last = await Notifications.getLastNotificationResponseAsync();
+            openFromResponse(last);
+        })();
+
+        return () => {
+            cancelled = true;
+            sub?.remove();
+        };
     }, []);
 
     return children;

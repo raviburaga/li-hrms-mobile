@@ -14,6 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
 import { api } from '../../src/api/client';
 import { useAuthStore } from '../../src/store/useAuthStore';
+import { canViewAttendanceModule } from '../../src/lib/permissions';
+import { ModuleAccessDenied } from '../../src/components/ModuleAccessDenied';
 import {
     todayYmdIST,
     formatTimeIST,
@@ -87,6 +89,7 @@ function formatLateEarly(mins: number | null | undefined): string {
 
 export default function AttendanceScreen() {
     const { user, employee } = useAuthStore();
+    const canViewModule = canViewAttendanceModule(user);
     const empNo = (user?.emp_no || employee?.emp_no || '').trim().toUpperCase();
     const { width } = useWindowDimensions();
 
@@ -259,6 +262,10 @@ export default function AttendanceScreen() {
           : mergedToday?.status
             ? mergedToday.status.replace(/_/g, ' ')
             : 'No record yet';
+
+    if (!canViewModule) {
+        return <ModuleAccessDenied moduleLabel="Attendance" />;
+    }
 
     if (!empNo && !loading) {
         return (
