@@ -1,6 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import { getAppSocket, disconnectAppSocket } from '../lib/appSocket';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAuthPersistHydrated } from '../hooks/useAuthPersistHydrated';
@@ -13,6 +12,7 @@ import {
     syncBadgeCount,
     unregisterExpoPushToken,
     presentLocalAppNotification,
+    isExpoGoAndroid,
 } from './pushRegistration';
 import { openNotificationTarget } from './notificationNavigation';
 import { showAppToast } from '../ui/toast';
@@ -129,7 +129,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }, [hydrated, isAuthenticated, isLoggingOut, userId, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
 
     useEffect(() => {
-        const openFromResponse = (response: Notifications.NotificationResponse | null) => {
+        if (isExpoGoAndroid()) return;
+
+        let mounted = true;
+        let subscription: { remove: () => void } | null = null;
+
+        const openFromResponse = (response: any | null) => {
             if (!response) return;
             const data = response.notification.request.content.data as {
                 type?: string;
@@ -153,9 +158,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             });
         };
 
-        const sub = Notifications.addNotificationResponseReceivedListener(openFromResponse);
-        void Notifications.getLastNotificationResponseAsync().then(openFromResponse);
-        return () => sub.remove();
+        void (async () => {
+            try {
+                const Notifications = await import('expo-notifications');
+                if (!mounted) return;
+                subscription = Notifications.addNotificationResponseReceivedListener(openFromResponse);
+                void Notifications.getLastNotificationResponseAsync().then(openFromResponse);
+            } catch (error) {
+                if (__DEV__) console.warn('[Push] Notification response listener unavailable', error);
+            }
+        })();
+
+        return () => {
+            mounted = false;
+            subscription?.remove();
+        };
     }, []);
 
     return children;

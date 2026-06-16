@@ -4,6 +4,8 @@ import {
     ScrollView,
     TouchableOpacity,
     RefreshControl,
+    Linking,
+    ActivityIndicator,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -22,6 +24,7 @@ import {
     Banknote,
     Timer,
     Receipt,
+    LifeBuoy,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -36,6 +39,7 @@ import { UpdateEnforcer } from '../../src/features/update/UpdateEnforcer';
 import { canViewOtPermissionsModule, canViewPayslipsModule } from '../../src/lib/permissions';
 import { useNotificationStore } from '../../src/notifications/notificationStore';
 import { TodayBirthdayBanner, type TodayBirthdayItem } from '../../src/components/TodayBirthdayBanner';
+import { showAppToast } from '../../src/ui/toast';
 import {
     HolidayCelebrationModal,
     TodayHolidayBanner,
@@ -212,6 +216,7 @@ export default function DashboardScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState<DashboardStats>({});
     const [attendanceRow, setAttendanceRow] = useState<AttendanceDay | null>(null);
+    const [ticketLoading, setTicketLoading] = useState(false);
     const notificationUnread = useNotificationStore((s) => s.unreadCount);
     const refreshUnreadCount = useNotificationStore((s) => s.refreshUnreadCount);
     const [todayBirthdayItems, setTodayBirthdayItems] = useState<TodayBirthdayItem[]>([]);
@@ -304,6 +309,28 @@ export default function DashboardScreen() {
     );
 
     const showGlobalAttendanceCard = userRole !== 'super_admin';
+
+    const openTicketPortal = useCallback(async () => {
+        if (ticketLoading) return;
+
+        setTicketLoading(true);
+        try {
+            const response = await api.getTicketSsoUrl();
+            const url = response.data?.data?.url;
+            if (response.status === 200 && response.data?.success && url) {
+                await Linking.openURL(url);
+                return;
+            }
+            showAppToast(
+                response.data?.message || 'Could not open the ticket management portal. Please try again later.',
+                'error'
+            );
+        } catch {
+            showAppToast('Could not connect to generate a ticket portal login link.', 'error');
+        } finally {
+            setTicketLoading(false);
+        }
+    }, [ticketLoading]);
 
     const employeeCco =
         stats.compensatoryOffBalance != null && Number.isFinite(Number(stats.compensatoryOffBalance))
@@ -735,6 +762,31 @@ export default function DashboardScreen() {
                     </View>
                 </ScrollView>
             </SafeAreaView>
+
+            <TouchableOpacity
+                activeOpacity={0.88}
+                disabled={ticketLoading}
+                onPress={openTicketPortal}
+                accessibilityRole="button"
+                accessibilityLabel="Raise a ticket for any queries"
+                className="absolute bottom-24 right-5 flex-row items-end"
+            >
+                <View className="mr-2 max-w-[190px] rounded-2xl border border-teal-100 bg-white px-3 py-2 shadow-sm">
+                    <Text className="text-[12px] font-black text-neutral-900">Have any queries?</Text>
+                    <Text className="mt-0.5 text-[10px] font-medium text-neutral-500">
+                        Tap here to raise a ticket.
+                    </Text>
+                </View>
+                <View className="h-14 w-14 items-center justify-center rounded-full border-[3px] border-teal-500 bg-emerald-50 shadow-sm">
+                    <View className="h-10 w-10 items-center justify-center rounded-full bg-emerald-600">
+                        {ticketLoading ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                            <LifeBuoy size={22} color="#FFFFFF" strokeWidth={2.5} />
+                        )}
+                    </View>
+                </View>
+            </TouchableOpacity>
         </View>
     );
 }

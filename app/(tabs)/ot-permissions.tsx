@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -9,6 +9,7 @@ import {
     Modal,
     Alert,
     Platform,
+    TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -25,6 +26,12 @@ import {
     canApproveOtPermissionFromApi,
 } from '../../src/lib/permissions';
 import { formatDateTimeIST, formatDateOnlyIST } from '../../src/utils/dateIST';
+import {
+    buildPayPeriodOptions,
+    getDefaultLeaveODDateRange,
+    matchPayPeriodValue,
+    type PayPeriodRange,
+} from '../../src/utils/payPeriodRange';
 
 type MainTab = 'ot' | 'permissions' | 'pending';
 
@@ -80,9 +87,15 @@ function permissionTypeLabel(t?: string): string {
 export default function OtPermissionsScreen() {
     const router = useRouter();
     const { user } = useAuthStore();
-    const [mainTab, setMainTab] = useState<MainTab>('ot');
+    const [mainTab, setMainTab] = useState<MainTab>(() => {
+        const role = String(useAuthStore.getState().user?.role || '').toLowerCase();
+        return role && role !== 'employee' ? 'pending' : 'ot';
+    });
     const [otRows, setOtRows] = useState<Record<string, unknown>[]>([]);
     const [permRows, setPermRows] = useState<Record<string, unknown>[]>([]);
+    const [payCycleStartDay, setPayCycleStartDay] = useState(1);
+    const [payCycleEndDay, setPayCycleEndDay] = useState<number | null>(null);
+    const [dateRange, setDateRange] = useState<PayPeriodRange>(() => getDefaultLeaveODDateRange(1));
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [detail, setDetail] = useState<{ kind: 'ot' | 'permission'; row: Record<string, unknown> } | null>(null);
@@ -96,11 +109,59 @@ export default function OtPermissionsScreen() {
     const canApplyPerm = canApplyPermissionFromApi(user);
     const canApprove = canApproveOtPermissionFromApi(user);
 
+    useEffect(() => {
+        if (canApprove) setMainTab('pending');
+    }, [canApprove]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const readSettingNumber = (body: ApiEnvelope<{ key?: string; value?: unknown }>): number | null => {
+            const value = body.data?.value;
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        };
+        const loadPayCycle = async () => {
+            try {
+                const [startRes, endRes] = await Promise.all([
+                    api.getSetting('payroll_cycle_start_day'),
+                    api.getSetting('payroll_cycle_end_day'),
+                ]);
+                if (cancelled) return;
+                const start = readSettingNumber(startRes.data as ApiEnvelope<{ key?: string; value?: unknown }>) || 1;
+                const end = readSettingNumber(endRes.data as ApiEnvelope<{ key?: string; value?: unknown }>);
+                setPayCycleStartDay(start);
+                setPayCycleEndDay(end);
+                setDateRange(getDefaultLeaveODDateRange(start));
+            } catch {
+                if (!cancelled) setDateRange(getDefaultLeaveODDateRange(1));
+            }
+        };
+        void loadPayCycle();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const payPeriodOptions = useMemo(
+        () =>
+            buildPayPeriodOptions({
+                payrollCycleStartDay: payCycleStartDay,
+                payrollCycleEndDay: payCycleEndDay,
+                getDefaultRange: () => getDefaultLeaveODDateRange(payCycleStartDay),
+            }),
+        [payCycleEndDay, payCycleStartDay]
+    );
+    const payPeriodSelectValue = useMemo(
+        () => matchPayPeriodValue(dateRange, payPeriodOptions, () => getDefaultLeaveODDateRange(payCycleStartDay)),
+        [dateRange, payCycleStartDay, payPeriodOptions]
+    );
+
     const load = useCallback(async () => {
         setLoading(true);
         try {
+            const periodFilters = { startDate: dateRange.from, endDate: dateRange.to };
             if (mainTab === 'ot') {
-                const res = await api.getOTRequests({});
+                const res = await api.getOTRequests(periodFilters);
                 const body = res.data as ApiEnvelope<unknown[]>;
                 if (res.status === 200 && body.success && Array.isArray(body.data)) {
                     setOtRows(body.data as Record<string, unknown>[]);
@@ -108,7 +169,7 @@ export default function OtPermissionsScreen() {
                     setOtRows([]);
                 }
             } else if (mainTab === 'permissions') {
-                const res = await api.getPermissions({});
+                const res = await api.getPermissions(periodFilters);
                 const body = res.data as ApiEnvelope<unknown[]>;
                 if (res.status === 200 && body.success && Array.isArray(body.data)) {
                     setPermRows(body.data as Record<string, unknown>[]);
@@ -117,8 +178,8 @@ export default function OtPermissionsScreen() {
                 }
             } else {
                 const [otRes, pRes] = await Promise.all([
-                    api.getOTRequests({ status: 'pending' }),
-                    api.getPermissions({ status: 'pending' }),
+                    api.getOTRequests({ ...periodFilters, status: 'pending' }),
+                    api.getPermissions({ ...periodFilters, status: 'pending' }),
                 ]);
                 const otb = otRes.data as ApiEnvelope<unknown[]>;
                 const pb = pRes.data as ApiEnvelope<unknown[]>;
@@ -132,7 +193,7 @@ export default function OtPermissionsScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [mainTab]);
+    }, [dateRange.from, dateRange.to, mainTab]);
 
     useFocusEffect(
         useCallback(() => {
@@ -405,6 +466,52 @@ export default function OtPermissionsScreen() {
                                 <Text className="ml-1 text-[10px] font-black uppercase text-indigo-800">Apply perm</Text>
                             </TouchableOpacity>
                         ) : null}
+                    </View>
+                    <View className="mt-3 rounded-2xl border-2 border-neutral-100 bg-white p-3">
+                        <Text className="mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-400">Pay period</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-1 mb-3">
+                            <View className="flex-row gap-2 px-1">
+                                {payPeriodOptions.map((option) => (
+                                    <TouchableOpacity
+                                        key={option.value}
+                                        onPress={() => setDateRange(option.range)}
+                                        className={`rounded-full border px-3 py-2 ${
+                                            payPeriodSelectValue === option.value ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-200 bg-neutral-50'
+                                        }`}
+                                    >
+                                        <Text
+                                            className={`text-[10px] font-black uppercase ${
+                                                payPeriodSelectValue === option.value ? 'text-emerald-800' : 'text-neutral-600'
+                                            }`}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </ScrollView>
+                        <View className="flex-row gap-2">
+                            <View className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3">
+                                <Text className="pt-2 text-[9px] font-black uppercase tracking-wider text-neutral-500">From date</Text>
+                                <TextInput
+                                    value={dateRange.from}
+                                    onChangeText={(from) => setDateRange((prev) => ({ ...prev, from }))}
+                                    placeholder="YYYY-MM-DD"
+                                    placeholderTextColor="#94A3B8"
+                                    className="h-9 text-xs font-bold text-neutral-800"
+                                />
+                            </View>
+                            <View className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3">
+                                <Text className="pt-2 text-[9px] font-black uppercase tracking-wider text-neutral-500">To date</Text>
+                                <TextInput
+                                    value={dateRange.to}
+                                    onChangeText={(to) => setDateRange((prev) => ({ ...prev, to }))}
+                                    placeholder="YYYY-MM-DD"
+                                    placeholderTextColor="#94A3B8"
+                                    className="h-9 text-xs font-bold text-neutral-800"
+                                />
+                            </View>
+                        </View>
                     </View>
                 </View>
 

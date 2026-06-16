@@ -4,6 +4,9 @@ import { redirectToLogin } from '../auth/redirectToLogin';
 import { API_BASE_URL } from '../constants/Config';
 import { showAppToast } from '../ui/toast';
 
+const AUTH_SKIP_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout'];
+let refreshInFlight: Promise<boolean> | null = null;
+
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
     headers: {
@@ -22,17 +25,71 @@ apiClient.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
+function shouldAttemptTokenRefresh(url?: string, code?: string): boolean {
+    if (!url || AUTH_SKIP_REFRESH_PATHS.some((path) => url.includes(path))) return false;
+    return code === 'TOKEN_EXPIRED';
+}
+
+async function refreshAccessToken(): Promise<boolean> {
+    if (refreshInFlight) return refreshInFlight;
+
+    refreshInFlight = (async () => {
+        const refreshToken = useAuthStore.getState().refreshToken;
+        if (!refreshToken) return false;
+
+        try {
+            const response = await axios.post<ApiEnvelope<{ token?: string; accessToken?: string; refreshToken?: string }>>(
+                `${API_BASE_URL}/auth/refresh`,
+                { refreshToken },
+                { headers: { 'Content-Type': 'application/json' }, validateStatus: () => true }
+            );
+            const accessToken = response.data?.data?.accessToken || response.data?.data?.token;
+            const nextRefreshToken = response.data?.data?.refreshToken;
+            if (response.status !== 200 || !response.data?.success || !accessToken) return false;
+
+            useAuthStore.getState().setTokens(accessToken, nextRefreshToken);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            refreshInFlight = null;
+        }
+    })();
+
+    return refreshInFlight;
+}
+
 apiClient.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
         const status = error?.response?.status as number | undefined;
+        const code = error?.response?.data?.code as string | undefined;
+        const originalConfig = error?.config as (import('axios').InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+
+        if (
+            status === 401 &&
+            originalConfig &&
+            !originalConfig._retry &&
+            shouldAttemptTokenRefresh(originalConfig.url, code)
+        ) {
+            originalConfig._retry = true;
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                const token = useAuthStore.getState().token;
+                if (token) originalConfig.headers.Authorization = `Bearer ${token}`;
+                return apiClient(originalConfig);
+            }
+        }
 
         if (status === 401) {
-            showAppToast('Your session expired. Please sign in again.', 'error');
-            void (async () => {
-                await useAuthStore.getState().logout();
-                redirectToLogin();
-            })();
+            const isAuthenticated = useAuthStore.getState().isAuthenticated;
+            if (isAuthenticated) {
+                showAppToast('Your session expired. Please sign in again.', 'error');
+                void (async () => {
+                    await useAuthStore.getState().logout();
+                    await redirectToLogin();
+                })();
+            }
             // Resolve expected auth errors so screens can handle gracefully without unhandled promise noise.
             return Promise.resolve(error.response);
         }
@@ -116,7 +173,7 @@ export type LiveAttendanceReportData = {
 };
 
 export const api = {
-    login: (data: { email: string; password: string }) => apiClient.post<ApiEnvelope>('/auth/login', data),
+    login: (data: { identifier?: string; email?: string; password: string }) => apiClient.post<ApiEnvelope>('/auth/login', data),
     getMe: () => apiClient.get<ApiEnvelope>('/auth/me'),
 
     updateProfile: (data: Record<string, unknown>) => apiClient.put<ApiEnvelope>('/users/profile', data),
@@ -207,6 +264,16 @@ export const api = {
 
     getDashboardStats: () =>
         apiClient.get<ApiEnvelope>('/dashboard/stats', { validateStatus: () => true }),
+
+    getTicketSsoUrl: (redirect?: string) => {
+        const q = new URLSearchParams();
+        if (redirect) q.set('redirect', redirect);
+        const qs = q.toString();
+        return apiClient.get<ApiEnvelope<{ url: string; redirect: string }>>(
+            `/auth/ticket-sso-url${qs ? `?${qs}` : ''}`,
+            okThrough4xx
+        );
+    },
 
     getDivision: (id: string) => apiClient.get<ApiEnvelope>(`/divisions/${id}`),
 

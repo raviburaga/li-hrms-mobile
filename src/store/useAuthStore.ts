@@ -48,14 +48,37 @@ interface AuthState {
     user: User | null;
     employee: Employee | null;
     token: string | null;
+    refreshToken: string | null;
     isAuthenticated: boolean;
+    rememberMe: boolean;
+    rememberedIdentifier: string;
     /** True while sign-out is clearing storage; keeps tabs from redirecting until finished. Not persisted. */
     isLoggingOut: boolean;
-    setAuth: (user: User, token: string) => void;
+    setAuth: (
+        user: User,
+        token: string,
+        refreshToken?: string | null,
+        options?: { rememberMe?: boolean; identifier?: string }
+    ) => void;
     setEmployee: (employee: Employee | null) => void;
     logout: () => Promise<void>;
     updateUser: (user: Partial<User>) => void;
+    setTokens: (token: string, refreshToken?: string | null) => void;
 }
+
+let activeWritePromise: Promise<void> | null = null;
+
+const customStorage = {
+    getItem: (name: string) => AsyncStorage.getItem(name),
+    setItem: (name: string, value: string) => {
+        activeWritePromise = AsyncStorage.setItem(name, value);
+        return activeWritePromise;
+    },
+    removeItem: (name: string) => {
+        activeWritePromise = AsyncStorage.removeItem(name);
+        return activeWritePromise;
+    },
+};
 
 export const useAuthStore = create<AuthState>()(
     persist(
@@ -63,11 +86,23 @@ export const useAuthStore = create<AuthState>()(
             user: null,
             employee: null,
             token: null,
+            refreshToken: null,
             isAuthenticated: false,
+            rememberMe: false,
+            rememberedIdentifier: '',
             isLoggingOut: false,
-            setAuth: (user, token) => set({ user, token, isAuthenticated: true }),
+            setAuth: (user, token, refreshToken, options) =>
+                set({
+                    user,
+                    token,
+                    refreshToken: refreshToken || null,
+                    isAuthenticated: true,
+                    rememberMe: Boolean(options?.rememberMe),
+                    rememberedIdentifier: options?.rememberMe ? options.identifier || '' : '',
+                }),
             setEmployee: (employee) => set({ employee }),
             logout: async () => {
+                const { rememberMe, rememberedIdentifier } = useAuthStore.getState();
                 try {
                     const { stopOdLocationTrailBackground } = await import('../odTrail/odLocationTrailBackground');
                     await stopOdLocationTrailBackground();
@@ -79,13 +114,24 @@ export const useAuthStore = create<AuthState>()(
                     user: null,
                     employee: null,
                     token: null,
+                    refreshToken: null,
                     isAuthenticated: false,
+                    rememberMe,
+                    rememberedIdentifier,
                 });
                 try {
-                    useAuthStore.persist.clearStorage();
+                    if (rememberMe && rememberedIdentifier) {
+                        if (activeWritePromise) {
+                            await activeWritePromise;
+                        }
+                    } else {
+                        await useAuthStore.persist.clearStorage();
+                    }
                 } catch {
                     try {
-                        await AsyncStorage.removeItem('auth-storage');
+                        if (!rememberMe) {
+                            await AsyncStorage.removeItem('auth-storage');
+                        }
                     } catch {
                         /* in-memory state already cleared */
                     }
@@ -96,15 +142,24 @@ export const useAuthStore = create<AuthState>()(
                 set((state) => ({
                     user: state.user ? { ...state.user, ...updatedUser } : null
                 })),
+            setTokens: (token, refreshToken) =>
+                set({
+                    token,
+                    refreshToken: refreshToken || null,
+                    isAuthenticated: true,
+                }),
         }),
         {
             name: 'auth-storage',
-            storage: createJSONStorage(() => AsyncStorage),
+            storage: createJSONStorage(() => customStorage),
             partialize: (state) => ({
-                user: state.user,
-                employee: state.employee,
-                token: state.token,
-                isAuthenticated: state.isAuthenticated,
+                user: state.rememberMe ? state.user : null,
+                employee: state.rememberMe ? state.employee : null,
+                token: state.rememberMe ? state.token : null,
+                refreshToken: state.rememberMe ? state.refreshToken : null,
+                isAuthenticated: state.rememberMe ? state.isAuthenticated : false,
+                rememberMe: state.rememberMe,
+                rememberedIdentifier: state.rememberedIdentifier,
             }),
         }
     )

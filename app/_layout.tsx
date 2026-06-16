@@ -1,3 +1,4 @@
+import '../src/styles/global.css';
 import { Stack, router, useSegments } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
@@ -8,7 +9,6 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { useAuthPersistHydrated } from '../src/hooks/useAuthPersistHydrated';
 import { NotificationProvider } from '../src/notifications/NotificationProvider';
 import '../src/odTrail/odLocationTrailBackground';
-import '../src/styles/global.css';
 
 function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
     const first = segments[0];

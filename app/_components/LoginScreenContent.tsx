@@ -9,8 +9,8 @@ import {
     Alert,
     ActivityIndicator,
 } from 'react-native';
-import { router, useRootNavigationState } from 'expo-router';
-import { Mail, Lock, ChevronRight, Fingerprint } from 'lucide-react-native';
+import { router, useRootNavigationState, usePathname } from 'expo-router';
+import { Check, Lock, ChevronRight, Fingerprint, UserRound } from 'lucide-react-native';
 import { MotiView, MotiText } from 'moti';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -34,6 +34,8 @@ type LoginPayload = {
         allowedDivisions?: Array<string | { _id?: string; name?: string }>;
     };
     token: string;
+    accessToken?: string;
+    refreshToken?: string;
 };
 
 /**
@@ -41,19 +43,34 @@ type LoginPayload = {
  */
 export default function LoginScreenContent() {
     const rootNavigationState = useRootNavigationState();
-    const { setAuth, isAuthenticated } = useAuthStore();
+    const pathname = usePathname();
+    const { setAuth, isAuthenticated, rememberMe: storedRememberMe, rememberedIdentifier } = useAuthStore();
 
-    const [email, setEmail] = useState('');
+    const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
-    const [isEmailFocused, setIsEmailFocused] = useState(false);
+    const [isIdentifierFocused, setIsIdentifierFocused] = useState(false);
     const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+    const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        setRememberMe(Boolean(storedRememberMe));
+        if (storedRememberMe && rememberedIdentifier) {
+            setIdentifier(rememberedIdentifier);
+        }
+    }, [rememberedIdentifier, storedRememberMe]);
 
     useEffect(() => {
         if (!rootNavigationState?.key) return;
         if (!isAuthenticated) return;
-        router.replace('/(tabs)');
-    }, [rootNavigationState?.key, isAuthenticated]);
+        
+        // Only trigger layout replacement if the user is actually on the login route.
+        // This avoids background-rendered instances of this component (such as in hidden tabs)
+        // from hijacking the router when navigating between active tab pages like Profile.
+        if (pathname === '/login') {
+            router.replace('/(tabs)');
+        }
+    }, [rootNavigationState?.key, isAuthenticated, pathname]);
 
     if (isAuthenticated) {
         return (
@@ -64,17 +81,18 @@ export default function LoginScreenContent() {
     }
 
     const handleLogin = async () => {
-        if (!email || !password) {
-            Alert.alert('Required', 'Please enter both email and password.');
+        if (!identifier || !password) {
+            Alert.alert('Required', 'Please enter username / employee number / email and password.');
             return;
         }
 
         setLoading(true);
         try {
-            const response = await api.login({ email, password });
+            const response = await api.login({ identifier, email: identifier, password });
             if (response.data.success && response.data.data) {
                 const payload = response.data.data as LoginPayload;
-                const { user, token } = payload;
+                const { user } = payload;
+                const accessToken = payload.accessToken || payload.token;
                 setAuth(
                     {
                         id: user._id,
@@ -89,7 +107,9 @@ export default function LoginScreenContent() {
                         departments: Array.isArray(user.departments) ? user.departments : undefined,
                         allowedDivisions: Array.isArray(user.allowedDivisions) ? user.allowedDivisions : undefined,
                     },
-                    token
+                    accessToken,
+                    payload.refreshToken,
+                    { rememberMe, identifier: identifier.trim() }
                 );
                 requestAnimationFrame(() => {
                     router.replace('/(tabs)');
@@ -146,32 +166,31 @@ export default function LoginScreenContent() {
                         <View className="space-y-6">
                             <MotiView
                                 animate={{
-                                    scale: isEmailFocused ? 1.02 : 1,
+                                    scale: isIdentifierFocused ? 1.02 : 1,
                                 }}
                                 className="h-20 flex-row items-center rounded-3xl border-2 border-[#F1F5F9] bg-white px-6 shadow-sm shadow-neutral-200"
-                                style={{ borderColor: isEmailFocused ? '#10B981' : '#F1F5F9' }}
+                                style={{ borderColor: isIdentifierFocused ? '#10B981' : '#F1F5F9' }}
                             >
-                                <Mail size={22} color={isEmailFocused ? '#10B981' : '#94A6B8'} strokeWidth={2.5} />
+                                <UserRound size={22} color={isIdentifierFocused ? '#10B981' : '#94A6B8'} strokeWidth={2.5} />
                                 <View className="ml-4 flex-1">
-                                    {(isEmailFocused || email.length > 0) && (
+                                    {(isIdentifierFocused || identifier.length > 0) && (
                                         <MotiText
                                             from={{ opacity: 0, translateY: 5 }}
                                             animate={{ opacity: 1, translateY: 0 }}
                                             className="mb-1 text-[10px] font-black uppercase tracking-widest text-primary"
                                         >
-                                            Email Address
+                                            Username / Employee No / Email
                                         </MotiText>
                                     )}
                                     <TextInput
-                                        placeholder={!isEmailFocused ? 'Email Address' : ''}
-                                        value={email}
-                                        onChangeText={setEmail}
-                                        onFocus={() => setIsEmailFocused(true)}
-                                        onBlur={() => setIsEmailFocused(false)}
+                                        placeholder={!isIdentifierFocused ? 'Username / Employee No / Email' : ''}
+                                        value={identifier}
+                                        onChangeText={setIdentifier}
+                                        onFocus={() => setIsIdentifierFocused(true)}
+                                        onBlur={() => setIsIdentifierFocused(false)}
                                         className="p-0 text-lg font-bold text-neutral-900"
                                         placeholderTextColor="#CBD5E1"
                                         autoCapitalize="none"
-                                        keyboardType="email-address"
                                     />
                                 </View>
                             </MotiView>
@@ -207,9 +226,25 @@ export default function LoginScreenContent() {
                                 </View>
                             </MotiView>
 
-                            <TouchableOpacity className="mt-1 self-end px-2">
-                                <Text className="text-xs font-bold uppercase tracking-widest text-neutral-400">Recovery Access?</Text>
-                            </TouchableOpacity>
+                            <View className="mt-4 flex-row items-center justify-between px-2">
+                                <TouchableOpacity
+                                    onPress={() => setRememberMe((value) => !value)}
+                                    activeOpacity={0.85}
+                                    className="flex-row items-center"
+                                >
+                                    <View
+                                        className={`mr-2 h-5 w-5 items-center justify-center rounded-md border ${
+                                            rememberMe ? 'border-emerald-500 bg-emerald-500' : 'border-neutral-300 bg-white'
+                                        }`}
+                                    >
+                                        {rememberMe ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
+                                    </View>
+                                    <Text className="text-xs font-bold uppercase tracking-widest text-neutral-500">Remember me</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity className="px-2">
+                                    <Text className="text-xs font-bold uppercase tracking-widest text-neutral-400">Recovery Access?</Text>
+                                </TouchableOpacity>
+                            </View>
 
                             <TouchableOpacity
                                 onPress={handleLogin}

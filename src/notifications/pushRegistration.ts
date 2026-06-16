@@ -1,27 +1,50 @@
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { api } from '../api/client';
 
 let lastRegisteredToken: string | null = null;
+let notificationHandlerConfigured = false;
 
-Notifications.setNotificationHandler({
-    handleNotification: async (notification) => {
-        const data = notification.request.content.data as { type?: string } | undefined;
-        const isOdTracking = data?.type === 'od_tracking';
-        return {
-            shouldShowAlert: !isOdTracking,
-            shouldShowBanner: !isOdTracking,
-            shouldShowList: true,
-            shouldPlaySound: !isOdTracking,
-            shouldSetBadge: !isOdTracking,
-        };
-    },
-});
+export function isExpoGoAndroid(): boolean {
+    return Platform.OS === 'android' && Constants.appOwnership === 'expo';
+}
+
+async function getNotifications() {
+    if (isExpoGoAndroid()) return null;
+    try {
+        return await import('expo-notifications');
+    } catch (error) {
+        if (__DEV__) console.warn('[Push] expo-notifications unavailable in this runtime', error);
+        return null;
+    }
+}
+
+async function configureNotificationHandler(): Promise<void> {
+    if (notificationHandlerConfigured) return;
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
+    Notifications.setNotificationHandler({
+        handleNotification: async (notification) => {
+            const data = notification.request.content.data as { type?: string } | undefined;
+            const isOdTracking = data?.type === 'od_tracking';
+            return {
+                shouldShowAlert: !isOdTracking,
+                shouldShowBanner: !isOdTracking,
+                shouldShowList: true,
+                shouldPlaySound: !isOdTracking,
+                shouldSetBadge: !isOdTracking,
+            };
+        },
+    });
+    notificationHandlerConfigured = true;
+}
 
 export async function ensureNotificationChannels(): Promise<void> {
     if (Platform.OS !== 'android') return;
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
+    await configureNotificationHandler();
     await Notifications.setNotificationChannelAsync('hrms-default', {
         name: 'HRMS alerts',
         importance: Notifications.AndroidImportance.DEFAULT,
@@ -39,8 +62,11 @@ export async function ensureNotificationChannels(): Promise<void> {
 }
 
 export async function requestNotificationPermissions(): Promise<boolean> {
+    if (isExpoGoAndroid()) return false;
     if (!Device.isDevice) return false;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return false;
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return true;
     const next = await Notifications.requestPermissionsAsync({
@@ -50,9 +76,15 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 export async function registerExpoPushToken(): Promise<string | null> {
+    if (isExpoGoAndroid()) {
+        if (__DEV__) console.warn('[Push] Expo Go on Android does not support remote push notifications. Use a development build to test push.');
+        return null;
+    }
     if (!Device.isDevice) return null;
     const granted = await requestNotificationPermissions();
     if (!granted) return null;
+    const Notifications = await getNotifications();
+    if (!Notifications) return null;
 
     const projectId =
         Constants.expoConfig?.extra?.eas?.projectId ??
@@ -91,7 +123,10 @@ export async function unregisterExpoPushToken(): Promise<void> {
 export const OD_TRACKING_NOTIFICATION_ID = 'hrms-od-location-trail';
 
 export async function presentOdTrackingNotification(odLabel?: string): Promise<void> {
+    if (isExpoGoAndroid()) return;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     await Notifications.scheduleNotificationAsync({
         identifier: OD_TRACKING_NOTIFICATION_ID,
         content: {
@@ -111,6 +146,8 @@ export async function presentOdTrackingNotification(odLabel?: string): Promise<v
 }
 
 export async function dismissOdTrackingNotification(): Promise<void> {
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     try {
         await Notifications.dismissNotificationAsync(OD_TRACKING_NOTIFICATION_ID);
     } catch {
@@ -136,7 +173,10 @@ export async function presentLocalAppNotification(input: {
     message: string;
     data?: Record<string, unknown>;
 }): Promise<void> {
+    if (isExpoGoAndroid()) return;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     await Notifications.scheduleNotificationAsync({
         content: {
             title: input.title,
@@ -149,6 +189,8 @@ export async function presentLocalAppNotification(input: {
 }
 
 export async function syncBadgeCount(count: number): Promise<void> {
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     try {
         await Notifications.setBadgeCountAsync(Math.max(0, count));
     } catch {

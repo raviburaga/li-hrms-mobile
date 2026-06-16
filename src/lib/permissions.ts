@@ -24,14 +24,35 @@ function canViewFeature(user: User | null | undefined, featureCode: string): boo
     if (!user) return false;
     const fc = user.featureControl;
     if (!fc || fc.length === 0) return true;
-    return fc.includes(featureCode) || fc.includes(`${featureCode}:read`) || fc.includes(`${featureCode}:write`);
+    return moduleCodesToCheck(featureCode).some(
+        (code) =>
+            fc.includes(code) ||
+            fc.includes(`${code}:read`) ||
+            fc.includes(`${code}:write`) ||
+            fc.includes(`${code}:verify`) ||
+            fc.includes(`${code}:terminate`) ||
+            fc.includes(`${code}:release`)
+    );
 }
 
 function canManageFeature(user: User | null | undefined, featureCode: string): boolean {
     if (!user) return false;
     const fc = user.featureControl;
     if (!fc || fc.length === 0) return true;
-    return fc.includes(featureCode) || fc.includes(`${featureCode}:write`);
+    return moduleCodesToCheck(featureCode).some((code) => fc.includes(code) || fc.includes(`${code}:write`));
+}
+
+const MODULE_CODE_ALIASES: Record<string, string[]> = {
+    LOANS: ['LOANS_SALARY_ADVANCE', 'LOAN'],
+    LOANS_SALARY_ADVANCE: ['LOANS', 'LOAN'],
+};
+
+function moduleCodesToCheck(moduleCode: string): string[] {
+    return [moduleCode, ...(MODULE_CODE_ALIASES[moduleCode] || [])];
+}
+
+export function canViewMobileModule(user: User | null | undefined, moduleCode: string): boolean {
+    return canViewFeature(user, moduleCode);
 }
 
 export function canViewTeamLeaves(user: User | null | undefined): boolean {
@@ -88,7 +109,7 @@ export function canApproveOtPermissionFromApi(user: User | null | undefined): bo
 }
 
 export function canViewEmployeesModule(user: User | null | undefined): boolean {
-    return isManagementRole(user) && canViewFeature(user, 'EMPLOYEES');
+    return canViewFeature(user, 'EMPLOYEES');
 }
 
 export function canApplyLeaves(user: User | null | undefined): boolean {
