@@ -17,19 +17,15 @@ export const API_BASE_URL = `${API_ORIGIN}/api`;
 export const CONFIG = {
     API_BASE_URL,
     APP_NAME: 'LI HRMS',
-    APP_VERSION: Constants.expoConfig?.version || '1.0.1',
+    APP_VERSION: Constants.expoConfig?.version || '1.0.2',
 };
 
 // Edit this list for each release. Only these points are shown in the "What's New" dialog.
 export const RELEASE_NOTES: string[] = [
     'Ravi Buraga',
+    'Adjusted the floating support ticket button position to prevent layout overlap with the bottom tab navigation bar.',
+    'Enabled dynamic OTA updates delivered directly via update channels.',
     'Improved app stability and smoother navigation experience.',
-    'Added new feature to allow users to update their profile information.',
-    'Fixed bug in the login process.',
-    'Improved the performance of the app.',
-    'Added new feature to allow users to update their profile information.',
-    'Fixed bug in the login process.',
-    'Improved the performance of the app.',
     'Added new feature to allow users to update their profile information.',
     'Fixed bug in the login process.',
     'Improved the performance of the app.',

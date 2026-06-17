@@ -142,7 +142,7 @@ export async function presentOdTrackingNotification(odLabel?: string): Promise<v
                 : 'Recording your location until you submit OD OUT.',
             sticky: true,
             autoDismiss: false,
-            sound: null,
+            sound: undefined,
             priority: Notifications.AndroidNotificationPriority.LOW,
             ...(Platform.OS === 'android' ? { channelId: 'od-tracking-silent' } : {}),
             data: { type: 'od_tracking' },

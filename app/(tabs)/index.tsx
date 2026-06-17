@@ -770,7 +770,7 @@ export default function DashboardScreen() {
                 onPress={openTicketPortal}
                 accessibilityRole="button"
                 accessibilityLabel="Raise a ticket for any queries"
-                className="absolute bottom-24 right-5 flex-row items-end"
+                className="absolute bottom-32 right-5 flex-row items-end"
             >
                 <View className="mr-2 max-w-[190px] rounded-2xl border border-teal-100 bg-white px-3 py-2 shadow-sm">
                     <Text className="text-[12px] font-black text-neutral-900">Have any queries?</Text>
