@@ -20,9 +20,9 @@ function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
 
 function navigateToSignIn(): void {
     try {
-        router.replace('/(tabs)/login');
+        router.replace('/login');
     } catch (e) {
-        if (__DEV__) console.warn('[AuthStackGuard] replace /(tabs)/login', e);
+        if (__DEV__) console.warn('[AuthStackGuard] replace /login', e);
     }
 }
 

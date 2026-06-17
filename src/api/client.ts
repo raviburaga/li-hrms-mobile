@@ -82,8 +82,8 @@ apiClient.interceptors.response.use(
         }
 
         if (status === 401) {
-            const isAuthenticated = useAuthStore.getState().isAuthenticated;
-            if (isAuthenticated) {
+            const { isAuthenticated, isLoggingOut } = useAuthStore.getState();
+            if (isAuthenticated && !isLoggingOut) {
                 showAppToast('Your session expired. Please sign in again.', 'error');
                 void (async () => {
                     await useAuthStore.getState().logout();

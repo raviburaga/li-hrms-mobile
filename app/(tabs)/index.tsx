@@ -226,6 +226,7 @@ export default function DashboardScreen() {
     const showPayslipsQuick = canViewPayslipsModule(user);
 
     const loadData = useCallback(async () => {
+        if (!useAuthStore.getState().isAuthenticated) return;
         try {
             const today = todayYmdIST();
 

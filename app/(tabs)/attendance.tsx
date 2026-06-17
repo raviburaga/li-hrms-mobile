@@ -107,6 +107,7 @@ export default function AttendanceScreen() {
     todayRef.current = today;
 
     const loadCalendar = useCallback(async () => {
+        if (!useAuthStore.getState().isAuthenticated) return;
         if (!empNo) {
             setError('Employee number missing. Sign in again or contact HR.');
             setLoading(false);
