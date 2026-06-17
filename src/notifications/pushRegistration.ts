@@ -94,8 +94,14 @@ export async function registerExpoPushToken(): Promise<string | null> {
         return null;
     }
 
-    const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
-    const token = tokenResult.data;
+    let token: string;
+    try {
+        const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
+        token = tokenResult.data;
+    } catch (e) {
+        if (__DEV__) console.warn('[Push] Error getting expo push token', e);
+        return null;
+    }
     if (!token || token === lastRegisteredToken) return token;
 
     const res = await api.subscribeExpoPush({

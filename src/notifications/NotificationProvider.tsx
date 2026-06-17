@@ -146,13 +146,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             };
             if (data?.type === 'od_tracking') return;
             openNotificationTarget({
-                _id: data.notificationId || 'push',
-                title: response.notification.request.content.title || 'Notification',
-                message: response.notification.request.content.body || '',
                 module: data.module || 'system',
-                eventType: '',
-                createdAt: new Date().toISOString(),
-                isRead: false,
                 entityId: data.entityId,
                 actionUrl: data.actionUrl || data.url,
             });
@@ -163,7 +157,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
                 const Notifications = await import('expo-notifications');
                 if (!mounted) return;
                 subscription = Notifications.addNotificationResponseReceivedListener(openFromResponse);
-                void Notifications.getLastNotificationResponseAsync().then(openFromResponse);
+                void Notifications.getLastNotificationResponseAsync().then(openFromResponse).catch(() => {});
             } catch (error) {
                 if (__DEV__) console.warn('[Push] Notification response listener unavailable', error);
             }
