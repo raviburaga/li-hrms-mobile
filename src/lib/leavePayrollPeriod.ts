@@ -164,10 +164,11 @@ export function buildCrossPayrollPeriodLeaveError(
     const to = (toYmd || fromYmd).trim();
     const check = leaveDatesInSinglePayrollPeriod(fromYmd, to, payrollCycleStartDay, payrollCycleEndDay);
     if (check.ok) return null;
+    const badCheck = check as { fromPeriod: { from: string; to: string }; toPeriod: { from: string; to: string } };
     return (
         `Leave cannot span payroll periods. ` +
-        `${formatPayrollPeriodRangeLabel(check.fromPeriod.from, check.fromPeriod.to)} covers the start; ` +
-        `${formatPayrollPeriodRangeLabel(check.toPeriod.from, check.toPeriod.to)} covers the end. ` +
+        `${formatPayrollPeriodRangeLabel(badCheck.fromPeriod.from, badCheck.fromPeriod.to)} covers the start; ` +
+        `${formatPayrollPeriodRangeLabel(badCheck.toPeriod.from, badCheck.toPeriod.to)} covers the end. ` +
         `Submit separate applications for each period.`
     );
 }
