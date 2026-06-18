@@ -431,6 +431,24 @@ export const api = {
     cancelOD: (id: string, reason?: string) =>
         apiClient.put<ApiEnvelope>(`/leaves/od/${id}/cancel`, { reason }),
 
+    revokeLeaveApproval: (id: string, reason?: string) =>
+        apiClient.put<ApiEnvelope>(`/leaves/${id}/revoke`, { reason }),
+
+    revokeODApproval: (id: string, reason?: string) =>
+        apiClient.put<ApiEnvelope>(`/leaves/od/${id}/revoke`, { reason }),
+
+    validateLeaveSplits: (leaveId: string, splits: unknown[]) =>
+        apiClient.post<ApiEnvelope>(`/leaves/${leaveId}/validate-splits`, { splits }),
+
+    createLeaveSplits: (leaveId: string, splits: unknown[]) =>
+        apiClient.post<ApiEnvelope>(`/leaves/${leaveId}/split`, { splits }),
+
+    getLeaveSplits: (leaveId: string) =>
+        apiClient.get<ApiEnvelope>(`/leaves/${leaveId}/splits`),
+
+    getLeaveSplitSummary: (leaveId: string) =>
+        apiClient.get<ApiEnvelope>(`/leaves/${leaveId}/split-summary`),
+
     getApprovedRecordsForDate: (employeeId: string, employeeNumber: string, date: string) => {
         const q = new URLSearchParams();
         if (employeeId) q.set('employeeId', employeeId);
