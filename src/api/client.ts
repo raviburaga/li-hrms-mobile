@@ -7,10 +7,11 @@ import { showAppToast } from '../ui/toast';
 const AUTH_SKIP_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout'];
 let refreshInFlight: Promise<boolean> | null = null;
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
     baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
+        'X-App-Platform': 'mobile',
     },
 });
 

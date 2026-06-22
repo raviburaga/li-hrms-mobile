@@ -8,6 +8,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useAuthPersistHydrated } from '../src/hooks/useAuthPersistHydrated';
 import { NotificationProvider } from '../src/notifications/NotificationProvider';
+import { useMobileSessionTracker } from '../src/hooks/useMobileSessionTracker';
 import '../src/odTrail/odLocationTrailBackground';
 
 function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
@@ -64,6 +65,8 @@ function AuthStackGuard() {
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
+    useMobileSessionTracker();
+
     const [loaded] = useFonts({
         // Add custom fonts here if needed
     });
