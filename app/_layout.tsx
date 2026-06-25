@@ -99,6 +99,7 @@ export default function RootLayout() {
                 <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="apply-ot" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="apply-permission" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="background-setup" options={{ animation: 'slide_from_right' }} />
                 </Stack>
             </NotificationProvider>
         </SafeAreaProvider>

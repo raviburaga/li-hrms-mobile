@@ -7,7 +7,6 @@ import { useNotificationStore } from './notificationStore';
 import type { InAppNotification } from '../api/client';
 import {
     markOdTrackingInactive,
-    markOdTrackingActive,
     registerExpoPushToken,
     syncBadgeCount,
     unregisterExpoPushToken,
@@ -16,7 +15,7 @@ import {
 } from './pushRegistration';
 import { openNotificationTarget } from './notificationNavigation';
 import { showAppToast } from '../ui/toast';
-import { getActiveOdTrailId } from '../odTrail/odLocationTrailBackground';
+import { ensureOdLocationTrailResumed } from '../odTrail/odLocationTrailBackground';
 
 function asInAppNotification(payload: unknown): InAppNotification | null {
     if (!payload || typeof payload !== 'object') return null;
@@ -40,6 +39,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
     const isLoggingOut = useAuthStore((s) => s.isLoggingOut);
     const userId = useAuthStore((s) => s.user?.id);
+    const user = useAuthStore((s) => s.user);
 
     const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
     const prependNotification = useNotificationStore((s) => s.prependNotification);
@@ -53,10 +53,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             appState.current = next;
             if (next === 'active' && isAuthenticated) {
                 void refreshUnreadCount();
+                void ensureOdLocationTrailResumed(user);
             }
         });
         return () => sub.remove();
-    }, [isAuthenticated, refreshUnreadCount]);
+    }, [isAuthenticated, refreshUnreadCount, user]);
 
     useEffect(() => {
         if (!hydrated || !isAuthenticated || isLoggingOut || !userId) {
@@ -71,10 +72,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         void (async () => {
             await refreshUnreadCount();
             await registerExpoPushToken();
-            const activeOdId = await getActiveOdTrailId();
-            if (activeOdId) {
-                await markOdTrackingActive(activeOdId);
-            }
+            await ensureOdLocationTrailResumed(user);
         })();
 
         const socket = getAppSocket();
@@ -126,7 +124,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             socket.off('notification_unread_count', onUnread);
             socket.off('toast_notification', onToast);
         };
-    }, [hydrated, isAuthenticated, isLoggingOut, userId, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
+    }, [hydrated, isAuthenticated, isLoggingOut, userId, user, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
 
     useEffect(() => {
         if (isExpoGoAndroid()) return;

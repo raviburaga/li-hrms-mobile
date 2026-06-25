@@ -22,6 +22,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { canOdUploadFromDevice } from '../src/lib/permissions';
 import { startOdLocationTrailBackground } from '../src/odTrail/odLocationTrailBackground';
 import { canRecordOdLocationTrail } from '../src/odTrail/odTrailEligibility';
+import { BackgroundReadinessBanner } from '../src/background/BackgroundReadinessBanner';
 import { DateField, formatYmd } from '../src/components/DateField';
 
 type OdTypeOpt = { code: string; name: string; isActive?: boolean };
@@ -309,13 +310,26 @@ export default function ApplyODScreen() {
             if (body.success) {
                 const od = body.data;
                 const odId = od?._id != null ? String(od._id) : '';
+                let bgTrailStarted = false;
                 if (odId && canRecordOdLocationTrail(od, user)) {
-                    void startOdLocationTrailBackground(odId).catch(() => {});
+                    try {
+                        bgTrailStarted = await startOdLocationTrailBackground(odId);
+                    } catch {
+                        bgTrailStarted = false;
+                    }
                 }
+                const trailHint = bgTrailStarted
+                    ? 'Your route is being recorded in the background until you submit OD OUT (you may close the app or switch to other apps).'
+                    : 'Open Profile → Background services and enable “Always” location so your on-duty route keeps recording when the app is closed.';
                 Alert.alert(
                     'OD IN saved',
-                    'Your OD is in draft until you submit OD OUT evidence from the request details screen.',
-                    [{ text: 'OK', onPress: () => router.back() }]
+                    `Your OD is in draft until you submit OD OUT evidence from the request details screen. ${trailHint}`,
+                    bgTrailStarted
+                        ? [{ text: 'OK', onPress: () => router.back() }]
+                        : [
+                              { text: 'Open setup', onPress: () => router.push('/background-setup') },
+                              { text: 'Later', onPress: () => router.back() },
+                          ]
                 );
             } else {
                 Alert.alert('Failed', body.message || body.error || 'Could not submit');
@@ -352,6 +366,7 @@ export default function ApplyODScreen() {
                     </View>
                 ) : (
                     <ScrollView className="flex-1 px-6" keyboardShouldPersistTaps="handled">
+                        <BackgroundReadinessBanner />
                         <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">OD type</Text>
                         <TouchableOpacity
                             onPress={() => setTypeModal(true)}
