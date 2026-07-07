@@ -375,8 +375,23 @@ export default function ApplyLeaveScreen() {
             } else {
                 Alert.alert('Failed', body.message || body.error || 'Could not submit');
             }
-        } catch {
-            Alert.alert('Error', 'Network error');
+        } catch (e: unknown) {
+            console.error('Leave apply failed:', e);
+            const message = (() => {
+                if (e && typeof e === 'object') {
+                    const maybeResponse = (e as { response?: { data?: { message?: string; error?: string; details?: string; validationErrors?: string[] }; status?: number } }).response;
+                    const body = maybeResponse?.data;
+                    if (body) {
+                        const detail = body.message || body.error || body.details || (body.validationErrors?.join('\n') ?? '');
+                        if (detail) return detail;
+                    }
+                    if ('message' in e && typeof (e as Error).message === 'string') {
+                        return (e as Error).message;
+                    }
+                }
+                return 'Network error';
+            })();
+            Alert.alert('Error', message);
         } finally {
             setSubmitting(false);
         }
