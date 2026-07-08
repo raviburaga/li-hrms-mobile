@@ -29,12 +29,18 @@
       "channel": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_ORIGIN": "http://103.140.18.28:5000"
       }
     },
     "production": {
       "channel": "production",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_ORIGIN": "http://103.140.18.28:5000"
       }
     }
   },

@@ -1,9 +1,9 @@
 import Constants from 'expo-constants';
 
 /** Released app builds (EAS / store). */
-const PRODUCTION_API_ORIGIN = 'https://hrms.pydah.edu.in';
+const PRODUCTION_API_ORIGIN = 'http://103.140.18.28:5000';
 /** Local backend on your machine (Expo dev, physical devices, emulators). */
-const LOCAL_DEV_API_ORIGIN = 'http://192.168.0.36:5000';
+const LOCAL_DEV_API_ORIGIN = 'http://103.140.18.28:5000';
 
 /** Set in `eas.json` (e.g. development profile) so device-installed dev clients use production API. Local `npx expo start` leaves this unset → `__DEV__` picks LAN.
  * For testing on physical device: set EXPO_PUBLIC_API_ORIGIN=http://YOUR_COMPUTER_IP:5000
