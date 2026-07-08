@@ -1,3 +1,4 @@
+import '../src/styles/global.css';
 import { Stack, router, useSegments } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
@@ -7,8 +8,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useAuthPersistHydrated } from '../src/hooks/useAuthPersistHydrated';
 import { NotificationProvider } from '../src/notifications/NotificationProvider';
+import { useMobileSessionTracker } from '../src/hooks/useMobileSessionTracker';
 import '../src/odTrail/odLocationTrailBackground';
-import '../src/styles/global.css';
 
 function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
     const first = segments[0];
@@ -20,9 +21,9 @@ function isPublicUnauthenticatedRoute(segments: readonly string[]): boolean {
 
 function navigateToSignIn(): void {
     try {
-        router.replace('/(tabs)/login');
+        router.replace('/login');
     } catch (e) {
-        if (__DEV__) console.warn('[AuthStackGuard] replace /(tabs)/login', e);
+        if (__DEV__) console.warn('[AuthStackGuard] replace /login', e);
     }
 }
 
@@ -61,9 +62,11 @@ function AuthStackGuard() {
 }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
+    useMobileSessionTracker();
+
     const [loaded] = useFonts({
         // Add custom fonts here if needed
     });
@@ -96,6 +99,7 @@ export default function RootLayout() {
                 <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="apply-ot" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="apply-permission" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="background-setup" options={{ animation: 'slide_from_right' }} />
                 </Stack>
             </NotificationProvider>
         </SafeAreaProvider>

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import { publishOdTrailPointsSocket } from './odTrailSocket';
 import { markOdTrackingActive, markOdTrackingInactive } from '../notifications/pushRegistration';
+import { canRecordOdLocationTrail, type OdTrailUser } from './odTrailEligibility';
 
 export const OD_LOCATION_TRAIL_TASK = 'OD_LOCATION_TRAIL_TASK';
 
@@ -186,4 +187,37 @@ export async function stopOdLocationTrailBackground(): Promise<void> {
     } catch {
         /* ignore */
     }
+}
+
+/**
+ * After the OS kills the app (e.g. swiped from recents), restart background location if an active OD trail
+ * is still persisted. Push notifications do not need this — they are delivered by FCM/APNs independently.
+ */
+export async function ensureOdLocationTrailResumed(user: OdTrailUser): Promise<boolean> {
+    const odId = await getActiveOdTrailId();
+    if (!odId || !user) return false;
+
+    try {
+        if (await Location.hasStartedLocationUpdatesAsync(OD_LOCATION_TRAIL_TASK)) {
+            await markOdTrackingActive(odId);
+            return true;
+        }
+    } catch {
+        /* fall through to restart */
+    }
+
+    try {
+        const res = await api.getOD(odId);
+        const body = res.data as { success?: boolean; data?: Record<string, unknown> };
+        const od = body.success ? body.data : null;
+        if (!od || !canRecordOdLocationTrail(od, user)) {
+            await stopOdLocationTrailBackground();
+            return false;
+        }
+    } catch {
+        /* offline — still attempt restart from persisted od id */
+    }
+
+    const restarted = await startOdLocationTrailBackground(odId);
+    return restarted;
 }

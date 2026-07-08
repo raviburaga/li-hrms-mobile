@@ -1,6 +1,6 @@
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, ChevronRight, Briefcase, Shield } from 'lucide-react-native';
+import { LogOut, ChevronRight, Briefcase, Shield, Smartphone } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -75,6 +75,20 @@ export default function ProfileIndexScreen() {
                                     <Briefcase size={20} color="#059669" strokeWidth={2.5} />
                                 </View>
                                 <Text className="ml-4 flex-1 text-base font-black text-neutral-900">Work & organization</Text>
+                                <ChevronRight size={20} color="#CBD5E1" strokeWidth={2.5} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => router.push('/background-setup')}
+                                className="mb-3 flex-row items-center rounded-[24px] border border-neutral-100 bg-white px-5 py-4 shadow-sm shadow-neutral-100"
+                                activeOpacity={0.85}
+                            >
+                                <View className="h-11 w-11 items-center justify-center rounded-2xl bg-sky-50">
+                                    <Smartphone size={20} color="#0284C7" strokeWidth={2.5} />
+                                </View>
+                                <View className="ml-4 flex-1">
+                                    <Text className="text-base font-black text-neutral-900">Background services</Text>
+                                    <Text className="mt-0.5 text-xs text-neutral-500">Notifications, GPS & battery for on-duty</Text>
+                                </View>
                                 <ChevronRight size={20} color="#CBD5E1" strokeWidth={2.5} />
                             </TouchableOpacity>
                             <TouchableOpacity

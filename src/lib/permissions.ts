@@ -25,15 +25,35 @@ function canViewFeature(user: User | null | undefined, featureCode: string): boo
     if (!user) return false;
     const fc = user.featureControl;
     if (!fc || fc.length === 0) return true;
-    return fc.includes(featureCode) || fc.includes(`${featureCode}:read`) || fc.includes(`${featureCode}:write`);
+    return moduleCodesToCheck(featureCode).some(
+        (code) =>
+            fc.includes(code) ||
+            fc.includes(`${code}:read`) ||
+            fc.includes(`${code}:write`) ||
+            fc.includes(`${code}:verify`) ||
+            fc.includes(`${code}:terminate`) ||
+            fc.includes(`${code}:release`)
+    );
 }
 
-/** Match web: hide write until featureControl is resolved (empty = no write). */
 function canManageFeature(user: User | null | undefined, featureCode: string): boolean {
     if (!user) return false;
     const fc = user.featureControl;
-    if (!fc || fc.length === 0) return false;
-    return fc.includes(featureCode) || fc.includes(`${featureCode}:write`);
+    if (!fc || fc.length === 0) return true;
+    return moduleCodesToCheck(featureCode).some((code) => fc.includes(code) || fc.includes(`${code}:write`));
+}
+
+const MODULE_CODE_ALIASES: Record<string, string[]> = {
+    LOANS: ['LOANS_SALARY_ADVANCE', 'LOAN'],
+    LOANS_SALARY_ADVANCE: ['LOANS', 'LOAN'],
+};
+
+function moduleCodesToCheck(moduleCode: string): string[] {
+    return [moduleCode, ...(MODULE_CODE_ALIASES[moduleCode] || [])];
+}
+
+export function canViewMobileModule(user: User | null | undefined, moduleCode: string): boolean {
+    return canViewFeature(user, moduleCode);
 }
 
 export function canViewDashboardModule(user: User | null | undefined): boolean {
@@ -114,11 +134,7 @@ export function canApproveOtPermissionFromApi(user: User | null | undefined): bo
 
 /** Match web: any role with EMPLOYEES:read (not management-only). */
 export function canViewEmployeesModule(user: User | null | undefined): boolean {
-    if (!user) return false;
-    if (normRole(user.role) === 'super_admin') return true;
-    return (
-        hasAnyRole(user, ['sub_admin', 'hr', 'hod', 'manager', 'employee']) && canViewFeature(user, 'EMPLOYEES')
-    );
+    return canViewFeature(user, 'EMPLOYEES');
 }
 
 export function canApplyLeaves(user: User | null | undefined): boolean {

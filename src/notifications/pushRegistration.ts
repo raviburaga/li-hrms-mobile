@@ -5,11 +5,47 @@ import { api } from '../api/client';
 import { isNativePushAvailable, loadNotificationsModule } from './pushEnvironment';
 
 let lastRegisteredToken: string | null = null;
+let notificationHandlerConfigured = false;
+
+export function isExpoGoAndroid(): boolean {
+    return Platform.OS === 'android' && Constants.appOwnership === 'expo';
+}
+
+async function getNotifications() {
+    if (isExpoGoAndroid()) return null;
+    try {
+        return await import('expo-notifications');
+    } catch (error) {
+        if (__DEV__) console.warn('[Push] expo-notifications unavailable in this runtime', error);
+        return null;
+    }
+}
+
+async function configureNotificationHandler(): Promise<void> {
+    if (notificationHandlerConfigured) return;
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
+    Notifications.setNotificationHandler({
+        handleNotification: async (notification) => {
+            const data = notification.request.content.data as { type?: string } | undefined;
+            const isOdTracking = data?.type === 'od_tracking';
+            return {
+                shouldShowAlert: !isOdTracking,
+                shouldShowBanner: !isOdTracking,
+                shouldShowList: true,
+                shouldPlaySound: !isOdTracking,
+                shouldSetBadge: !isOdTracking,
+            };
+        },
+    });
+    notificationHandlerConfigured = true;
+}
 
 export async function ensureNotificationChannels(): Promise<void> {
-    if (Platform.OS !== 'android' || !isNativePushAvailable()) return;
-    const Notifications = await loadNotificationsModule();
+    if (Platform.OS !== 'android') return;
+    const Notifications = await getNotifications();
     if (!Notifications) return;
+    await configureNotificationHandler();
     await Notifications.setNotificationChannelAsync('hrms-default', {
         name: 'HRMS alerts',
         importance: Notifications.AndroidImportance.DEFAULT,
@@ -27,10 +63,11 @@ export async function ensureNotificationChannels(): Promise<void> {
 }
 
 export async function requestNotificationPermissions(): Promise<boolean> {
-    if (!Device.isDevice || !isNativePushAvailable()) return false;
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) return false;
+    if (isExpoGoAndroid()) return false;
+    if (!Device.isDevice) return false;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return false;
     const current = await Notifications.getPermissionsAsync();
     if (current.granted) return true;
     const next = await Notifications.requestPermissionsAsync({
@@ -40,11 +77,15 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 export async function registerExpoPushToken(): Promise<string | null> {
-    if (!Device.isDevice || !isNativePushAvailable()) return null;
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) return null;
+    if (isExpoGoAndroid()) {
+        if (__DEV__) console.warn('[Push] Expo Go on Android does not support remote push notifications. Use a development build to test push.');
+        return null;
+    }
+    if (!Device.isDevice) return null;
     const granted = await requestNotificationPermissions();
     if (!granted) return null;
+    const Notifications = await getNotifications();
+    if (!Notifications) return null;
 
     const projectId =
         Constants.expoConfig?.extra?.eas?.projectId ??
@@ -54,8 +95,14 @@ export async function registerExpoPushToken(): Promise<string | null> {
         return null;
     }
 
-    const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
-    const token = tokenResult.data;
+    let token: string;
+    try {
+        const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
+        token = tokenResult.data;
+    } catch (e) {
+        if (__DEV__) console.warn('[Push] Error getting expo push token', e);
+        return null;
+    }
     if (!token || token === lastRegisteredToken) return token;
 
     const res = await api.subscribeExpoPush({
@@ -83,10 +130,10 @@ export async function unregisterExpoPushToken(): Promise<void> {
 export const OD_TRACKING_NOTIFICATION_ID = 'hrms-od-location-trail';
 
 export async function presentOdTrackingNotification(odLabel?: string): Promise<void> {
-    if (!isNativePushAvailable()) return;
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) return;
+    if (isExpoGoAndroid()) return;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     await Notifications.scheduleNotificationAsync({
         identifier: OD_TRACKING_NOTIFICATION_ID,
         content: {
@@ -96,7 +143,7 @@ export async function presentOdTrackingNotification(odLabel?: string): Promise<v
                 : 'Recording your location until you submit OD OUT.',
             sticky: true,
             autoDismiss: false,
-            sound: null,
+            sound: undefined,
             priority: Notifications.AndroidNotificationPriority.LOW,
             ...(Platform.OS === 'android' ? { channelId: 'od-tracking-silent' } : {}),
             data: { type: 'od_tracking' },
@@ -106,8 +153,7 @@ export async function presentOdTrackingNotification(odLabel?: string): Promise<v
 }
 
 export async function dismissOdTrackingNotification(): Promise<void> {
-    if (!isNativePushAvailable()) return;
-    const Notifications = await loadNotificationsModule();
+    const Notifications = await getNotifications();
     if (!Notifications) return;
     try {
         await Notifications.dismissNotificationAsync(OD_TRACKING_NOTIFICATION_ID);
@@ -134,10 +180,10 @@ export async function presentLocalAppNotification(input: {
     message: string;
     data?: Record<string, unknown>;
 }): Promise<void> {
-    if (!isNativePushAvailable()) return;
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) return;
+    if (isExpoGoAndroid()) return;
     await ensureNotificationChannels();
+    const Notifications = await getNotifications();
+    if (!Notifications) return;
     await Notifications.scheduleNotificationAsync({
         content: {
             title: input.title,
@@ -150,8 +196,7 @@ export async function presentLocalAppNotification(input: {
 }
 
 export async function syncBadgeCount(count: number): Promise<void> {
-    if (!isNativePushAvailable()) return;
-    const Notifications = await loadNotificationsModule();
+    const Notifications = await getNotifications();
     if (!Notifications) return;
     try {
         await Notifications.setBadgeCountAsync(Math.max(0, count));

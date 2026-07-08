@@ -52,6 +52,7 @@ export default function LiveAttendanceScreen() {
     }, []);
 
     const load = useCallback(async () => {
+        if (!useAuthStore.getState().isAuthenticated) return;
         setLoading(true);
         try {
             const [filterRes, reportRes] = await Promise.all([

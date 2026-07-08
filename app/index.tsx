@@ -76,7 +76,7 @@ export default function HomeScreen() {
                     transition={{ type: 'timing', duration: 550, delay: 120 }}
                 >
                     <TouchableOpacity
-                        onPress={() => router.push('/(tabs)/login')}
+                        onPress={() => router.push('/login')}
                         activeOpacity={0.92}
                         className="overflow-hidden rounded-[22px]"
                         style={{

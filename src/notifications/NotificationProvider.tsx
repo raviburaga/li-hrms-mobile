@@ -7,16 +7,16 @@ import { useNotificationStore } from './notificationStore';
 import type { InAppNotification } from '../api/client';
 import {
     markOdTrackingInactive,
-    markOdTrackingActive,
     registerExpoPushToken,
     syncBadgeCount,
     unregisterExpoPushToken,
     presentLocalAppNotification,
+    isExpoGoAndroid,
 } from './pushRegistration';
 import { openNotificationTarget } from './notificationNavigation';
 import { isNativePushAvailable, loadNotificationsModule } from './pushEnvironment';
 import { showAppToast } from '../ui/toast';
-import { getActiveOdTrailId } from '../odTrail/odLocationTrailBackground';
+import { ensureOdLocationTrailResumed } from '../odTrail/odLocationTrailBackground';
 
 function asInAppNotification(payload: unknown): InAppNotification | null {
     if (!payload || typeof payload !== 'object') return null;
@@ -40,6 +40,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
     const isLoggingOut = useAuthStore((s) => s.isLoggingOut);
     const userId = useAuthStore((s) => s.user?.id);
+    const user = useAuthStore((s) => s.user);
 
     const setUnreadCount = useNotificationStore((s) => s.setUnreadCount);
     const prependNotification = useNotificationStore((s) => s.prependNotification);
@@ -53,10 +54,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             appState.current = next;
             if (next === 'active' && isAuthenticated) {
                 void refreshUnreadCount();
+                void ensureOdLocationTrailResumed(user);
             }
         });
         return () => sub.remove();
-    }, [isAuthenticated, refreshUnreadCount]);
+    }, [isAuthenticated, refreshUnreadCount, user]);
 
     useEffect(() => {
         if (!hydrated || !isAuthenticated || isLoggingOut || !userId) {
@@ -71,10 +73,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         void (async () => {
             await refreshUnreadCount();
             await registerExpoPushToken();
-            const activeOdId = await getActiveOdTrailId();
-            if (activeOdId) {
-                await markOdTrackingActive(activeOdId);
-            }
+            await ensureOdLocationTrailResumed(user);
         })();
 
         const socket = getAppSocket();
@@ -126,15 +125,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             socket.off('notification_unread_count', onUnread);
             socket.off('toast_notification', onToast);
         };
-    }, [hydrated, isAuthenticated, isLoggingOut, userId, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
+    }, [hydrated, isAuthenticated, isLoggingOut, userId, user, prependNotification, refreshUnreadCount, reset, setUnreadCount]);
 
     useEffect(() => {
-        if (!isNativePushAvailable()) return undefined;
+        if (isExpoGoAndroid()) return;
 
-        let cancelled = false;
-        let sub: { remove: () => void } | undefined;
+        let mounted = true;
+        let subscription: { remove: () => void } | null = null;
 
-        const openFromResponse = (response: import('expo-notifications').NotificationResponse | null) => {
+        const openFromResponse = (response: any | null) => {
             if (!response) return;
             const data = response.notification.request.content.data as {
                 type?: string;
@@ -146,29 +145,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             };
             if (data?.type === 'od_tracking') return;
             openNotificationTarget({
-                _id: data.notificationId || 'push',
-                title: response.notification.request.content.title || 'Notification',
-                message: response.notification.request.content.body || '',
                 module: data.module || 'system',
-                eventType: '',
-                createdAt: new Date().toISOString(),
-                isRead: false,
                 entityId: data.entityId,
                 actionUrl: data.actionUrl || data.url,
             });
         };
 
         void (async () => {
-            const Notifications = await loadNotificationsModule();
-            if (!Notifications || cancelled) return;
-            sub = Notifications.addNotificationResponseReceivedListener(openFromResponse);
-            const last = await Notifications.getLastNotificationResponseAsync();
-            openFromResponse(last);
+            try {
+                const Notifications = await import('expo-notifications');
+                if (!mounted) return;
+                subscription = Notifications.addNotificationResponseReceivedListener(openFromResponse);
+                void Notifications.getLastNotificationResponseAsync().then(openFromResponse).catch(() => {});
+            } catch (error) {
+                if (__DEV__) console.warn('[Push] Notification response listener unavailable', error);
+            }
         })();
 
         return () => {
-            cancelled = true;
-            sub?.remove();
+            mounted = false;
+            subscription?.remove();
         };
     }, []);
 

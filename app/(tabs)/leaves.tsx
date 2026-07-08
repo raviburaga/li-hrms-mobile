@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -21,6 +21,12 @@ import { formatDateRangeIST } from '../../src/utils/dateIST';
 import { canActionLeaves, canApplyLeaves, canViewLeavesModule, canViewTeamLeaves, isManagementRole, permissionDebugSummary } from '../../src/lib/permissions';
 import { canCurrentUserActOnLeaveLikeItem } from '../../src/utils/workflowPermissions';
 import { SkeletonCard } from '../../src/components/Skeleton';
+import {
+    buildPayPeriodOptions,
+    getDefaultLeaveODDateRange,
+    matchPayPeriodValue,
+    type PayPeriodRange,
+} from '../../src/utils/payPeriodRange';
 
 type OrgNode = string | { _id?: string; name?: string; code?: string };
 type Row = {
@@ -105,11 +111,12 @@ export default function LeavesScreen() {
     const router = useRouter();
     const { user, employee, setEmployee } = useAuthStore();
     const [segment, setSegment] = useState<'leave' | 'od'>('leave');
-    const [scopeMode, setScopeMode] = useState<'my' | 'team'>('my');
+    const [scopeMode, setScopeMode] = useState<'my' | 'team'>(() => (isManagementRole(useAuthStore.getState().user) ? 'team' : 'my'));
     const [filter, setFilter] = useState<Filter>('all');
     const [searchText, setSearchText] = useState('');
-    const [fromDate, setFromDate] = useState('');
-    const [toDate, setToDate] = useState('');
+    const [payCycleStartDay, setPayCycleStartDay] = useState(1);
+    const [payCycleEndDay, setPayCycleEndDay] = useState<number | null>(null);
+    const [dateRange, setDateRange] = useState<PayPeriodRange>(() => getDefaultLeaveODDateRange(1));
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -125,6 +132,53 @@ export default function LeavesScreen() {
     const canViewModule = canViewLeavesModule(user);
     const canApply = canApplyLeaves(user);
     const showEmployeeMeta = isManagementRole(user);
+
+    useEffect(() => {
+        if (hasTeamView) setScopeMode('team');
+    }, [hasTeamView]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const readSettingNumber = (body: ApiEnvelope<{ key?: string; value?: unknown }>): number | null => {
+            const value = body.data?.value;
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        };
+        const loadPayCycle = async () => {
+            try {
+                const [startRes, endRes] = await Promise.all([
+                    api.getSetting('payroll_cycle_start_day'),
+                    api.getSetting('payroll_cycle_end_day'),
+                ]);
+                if (cancelled) return;
+                const start = readSettingNumber(startRes.data as ApiEnvelope<{ key?: string; value?: unknown }>) || 1;
+                const end = readSettingNumber(endRes.data as ApiEnvelope<{ key?: string; value?: unknown }>);
+                setPayCycleStartDay(start);
+                setPayCycleEndDay(end);
+                setDateRange(getDefaultLeaveODDateRange(start));
+            } catch {
+                if (!cancelled) setDateRange(getDefaultLeaveODDateRange(1));
+            }
+        };
+        void loadPayCycle();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const payPeriodOptions = useMemo(
+        () =>
+            buildPayPeriodOptions({
+                payrollCycleStartDay: payCycleStartDay,
+                payrollCycleEndDay: payCycleEndDay,
+                getDefaultRange: () => getDefaultLeaveODDateRange(payCycleStartDay),
+            }),
+        [payCycleEndDay, payCycleStartDay]
+    );
+    const payPeriodSelectValue = useMemo(
+        () => matchPayPeriodValue(dateRange, payPeriodOptions, () => getDefaultLeaveODDateRange(payCycleStartDay)),
+        [dateRange, payCycleStartDay, payPeriodOptions]
+    );
 
     const ensureEmployee = useCallback(async () => {
         if (!employee && user?.emp_no) {
@@ -142,14 +196,17 @@ export default function LeavesScreen() {
         setLoading(true);
         try {
             await ensureEmployee();
-            const q: { status?: string } = {};
+            const q: { status?: string; fromDate?: string; toDate?: string } = {
+                fromDate: dateRange.from,
+                toDate: dateRange.to,
+            };
             if (filter === 'approved') q.status = 'approved';
             else if (filter === 'rejected') q.status = 'rejected';
             const [lr, or, lpr, opr] = await Promise.all([
                 scopeMode === 'team' && hasTeamView ? api.getLeaves(q) : api.getMyLeaves(q),
                 scopeMode === 'team' && hasTeamView ? api.getODs(q) : api.getMyODs(q),
-                hasTeamView ? api.getPendingLeaveApprovals({ limit: 200 }) : Promise.resolve({ data: { success: false } }),
-                hasTeamView ? api.getPendingODApprovals({ limit: 200 }) : Promise.resolve({ data: { success: false } }),
+                hasTeamView ? api.getPendingLeaveApprovals({ limit: 200, fromDate: dateRange.from, toDate: dateRange.to }) : Promise.resolve({ data: { success: false } }),
+                hasTeamView ? api.getPendingODApprovals({ limit: 200, fromDate: dateRange.from, toDate: dateRange.to }) : Promise.resolve({ data: { success: false } }),
             ]);
             try {
                 const [leaveSettingsRes, odSettingsRes] = await Promise.all([
@@ -181,8 +238,8 @@ export default function LeavesScreen() {
                 o = o.filter((r) => pend(String(r.status)));
             }
             const qText = searchText.trim().toLowerCase();
-            const fromTs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
-            const toTs = toDate ? new Date(`${toDate}T23:59:59`).getTime() : null;
+            const fromTs = dateRange.from ? new Date(`${dateRange.from}T00:00:00`).getTime() : null;
+            const toTs = dateRange.to ? new Date(`${dateRange.to}T23:59:59`).getTime() : null;
             const matchRow = (r: Row, type: 'leave' | 'od') => {
                 const meta = employeeDisplay(r);
                 const hay = [
@@ -214,7 +271,7 @@ export default function LeavesScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [filter, ensureEmployee, scopeMode, hasTeamView, searchText, fromDate, toDate]);
+    }, [dateRange.from, dateRange.to, filter, ensureEmployee, scopeMode, hasTeamView, searchText]);
 
     useFocusEffect(
         useCallback(() => {
@@ -369,12 +426,34 @@ export default function LeavesScreen() {
 
                     {filtersOpen ? (
                         <View className="mb-4 rounded-2xl border-2 border-neutral-100 bg-white p-3">
+                            <Text className="mb-2 text-[9px] font-black uppercase tracking-wider text-neutral-500">Pay period</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-1 mb-3">
+                                <View className="flex-row gap-2 px-1">
+                                    {payPeriodOptions.map((option) => (
+                                        <TouchableOpacity
+                                            key={option.value}
+                                            onPress={() => setDateRange(option.range)}
+                                            className={`rounded-full border px-3 py-2 ${
+                                                payPeriodSelectValue === option.value ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-200 bg-neutral-50'
+                                            }`}
+                                        >
+                                            <Text
+                                                className={`text-[10px] font-black uppercase ${
+                                                    payPeriodSelectValue === option.value ? 'text-emerald-800' : 'text-neutral-600'
+                                                }`}
+                                            >
+                                                {option.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </ScrollView>
                             <View className="flex-row gap-2">
                                 <View className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3">
                                     <Text className="pt-2 text-[9px] font-black uppercase tracking-wider text-neutral-500">From date</Text>
                                     <TextInput
-                                        value={fromDate}
-                                        onChangeText={setFromDate}
+                                        value={dateRange.from}
+                                        onChangeText={(from) => setDateRange((prev) => ({ ...prev, from }))}
                                         placeholder="YYYY-MM-DD"
                                         placeholderTextColor="#94A3B8"
                                         className="h-9 text-xs text-neutral-800"
@@ -383,8 +462,8 @@ export default function LeavesScreen() {
                                 <View className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3">
                                     <Text className="pt-2 text-[9px] font-black uppercase tracking-wider text-neutral-500">To date</Text>
                                     <TextInput
-                                        value={toDate}
-                                        onChangeText={setToDate}
+                                        value={dateRange.to}
+                                        onChangeText={(to) => setDateRange((prev) => ({ ...prev, to }))}
                                         placeholder="YYYY-MM-DD"
                                         placeholderTextColor="#94A3B8"
                                         className="h-9 text-xs text-neutral-800"
@@ -393,8 +472,7 @@ export default function LeavesScreen() {
                             </View>
                             <TouchableOpacity
                                 onPress={() => {
-                                    setFromDate('');
-                                    setToDate('');
+                                    setDateRange(getDefaultLeaveODDateRange(payCycleStartDay));
                                     setSearchText('');
                                     setFilter('all');
                                 }}
