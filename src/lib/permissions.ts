@@ -170,10 +170,23 @@ export function isSelfPayslipView(user: User | null | undefined): boolean {
     return canViewPayslipsModule(user) && !canViewScopedPayslips(user);
 }
 
+export function canViewComplaintsModule(user: User | null | undefined): boolean {
+    return canViewFeature(user, 'COMPLAINTS');
+}
+
+export function canApplyComplaints(user: User | null | undefined): boolean {
+    return canManageFeature(user, 'COMPLAINTS');
+}
+
+export function canActionComplaints(user: User | null | undefined): boolean {
+    return hasAnyRole(user, ['super_admin', 'sub_admin', 'hr', 'hod', 'manager']) && canManageFeature(user, 'COMPLAINTS');
+}
+
 export function permissionDebugSummary(user: User | null | undefined): string {
     const role = String(user?.role || 'unknown');
     const leaves = `${canViewLeavesModule(user) ? 'R' : '-'}${canApplyLeaves(user) ? 'W' : '-'}`;
     const loans = `${canViewLoansModule(user) ? 'R' : '-'}${canApplyLoans(user) ? 'W' : '-'}`;
     const payslips = `${canViewPayslipsModule(user) ? 'R' : '-'}${canViewScopedPayslips(user) ? 'S' : ''}`;
-    return `role:${role} leaves:${leaves} loans:${loans} payslips:${payslips}`;
+    const complaints = `${canViewComplaintsModule(user) ? 'R' : '-'}${canApplyComplaints(user) ? 'W' : '-'}`;
+    return `role:${role} leaves:${leaves} loans:${loans} payslips:${payslips} complaints:${complaints}`;
 }

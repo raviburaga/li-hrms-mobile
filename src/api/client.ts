@@ -730,6 +730,32 @@ export const api = {
         const json = (await res.json()) as ApiEnvelope & { url?: string; key?: string };
         return { data: json };
     },
+
+    // Complaints Module
+    applyComplaint: (data: { employeeId?: string; empNo?: string; complaintType: string; imageUrl?: string; remarks: string }) =>
+        apiClient.post<ApiEnvelope>('/complaints', data),
+    getMyComplaints: () =>
+        apiClient.get<ApiEnvelope>('/complaints/my'),
+    getPendingComplaintApprovals: () =>
+        apiClient.get<ApiEnvelope>('/complaints/pending-approvals'),
+    getComplaints: (params?: { status?: string; fromDate?: string; toDate?: string }) => {
+        const q = new URLSearchParams();
+        if (params?.status) q.set('status', params.status);
+        if (params?.fromDate) q.set('fromDate', params.fromDate);
+        if (params?.toDate) q.set('toDate', params.toDate);
+        const qs = q.toString();
+        return apiClient.get<ApiEnvelope>(`/complaints${qs ? `?${qs}` : ''}`);
+    },
+    getComplaintDetails: (id: string) =>
+        apiClient.get<ApiEnvelope>(`/complaints/${id}`),
+    processComplaintAction: (id: string, action: 'approve' | 'reject', comments: string) =>
+        apiClient.put<ApiEnvelope>(`/complaints/${id}/action`, { action, comments }),
+    cancelComplaint: (id: string) =>
+        apiClient.put<ApiEnvelope>(`/complaints/${id}/cancel`),
+    getLeaveTypes: (type: 'leave' | 'od' | 'ccl' | 'complaint') =>
+        apiClient.get<ApiEnvelope>(`/leaves/types/${type}`),
+    addLeaveType: (type: 'leave' | 'od' | 'ccl' | 'complaint', data: any) =>
+        apiClient.post<ApiEnvelope>(`/leaves/types/${type}`, data),
 };
 
 export default apiClient;

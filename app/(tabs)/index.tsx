@@ -6,6 +6,7 @@ import {
     RefreshControl,
     Linking,
     ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -25,6 +26,8 @@ import {
     Timer,
     Receipt,
     LifeBuoy,
+    AlertTriangle,
+    LogOut,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -44,6 +47,7 @@ import {
     canViewOtPermissionsModule,
     canViewPayslipsModule,
     canViewProfileModule,
+    canViewComplaintsModule,
 } from '../../src/lib/permissions';
 import { ModuleAccessDenied } from '../../src/components/ModuleAccessDenied';
 import { useNotificationStore } from '../../src/notifications/notificationStore';
@@ -237,6 +241,7 @@ export default function DashboardScreen() {
     const showAttendanceQuick = canViewAttendanceModule(user);
     const showLoansQuick = canViewLoansModule(user);
     const showProfileQuick = canViewProfileModule(user);
+    const showComplaintsQuick = canViewComplaintsModule(user);
 
     const handleLogout = () => {
         Alert.alert('Sign Out', 'Are you sure you want to log out?', [
@@ -728,6 +733,16 @@ export default function DashboardScreen() {
                         <Text className="text-base font-black text-neutral-900">My portal</Text>
                     </View>
                     <View className="mb-24 rounded-3xl border border-neutral-100 bg-white/80 p-4">
+                        {showComplaintsQuick ? (
+                            <QuickLinkRow
+                                label="Complaints hub"
+                                desc="Register and track grievances"
+                                icon={AlertTriangle}
+                                color="#E11D48"
+                                bg="#FFE4E6"
+                                onPress={() => router.push('/complaints')}
+                            />
+                        ) : null}
                         {showLeavesQuick ? (
                             <QuickLinkRow
                                 label="Apply absence"
