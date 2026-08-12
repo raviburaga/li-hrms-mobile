@@ -26,9 +26,10 @@ type Props = {
     label?: string;
     selectedEmpNo: string;
     onSelect: (emp: Employee | null) => void;
+    ignoreScope?: boolean;
 };
 
-export function SearchableEmployeeSelect({ label = 'Select Employee', selectedEmpNo, onSelect }: Props) {
+export function SearchableEmployeeSelect({ label = 'Select Employee', selectedEmpNo, onSelect, ignoreScope }: Props) {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(false);
@@ -42,6 +43,7 @@ export function SearchableEmployeeSelect({ label = 'Select Employee', selectedEm
                 is_active: true,
                 search: term || undefined,
                 limit: 50,
+                ignoreScope: ignoreScope ? 'true' : undefined,
             });
             const body = res.data as ApiEnvelope<Employee[]>;
             if (body.success && Array.isArray(body.data)) {

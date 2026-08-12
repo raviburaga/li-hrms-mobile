@@ -740,7 +740,7 @@ export default function DashboardScreen() {
                                 icon={AlertTriangle}
                                 color="#E11D48"
                                 bg="#FFE4E6"
-                                onPress={() => router.push('/complaints')}
+                                onPress={() => router.push('/(tabs)/complaints')}
                             />
                         ) : null}
                         {showLeavesQuick ? (

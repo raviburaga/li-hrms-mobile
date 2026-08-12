@@ -13,7 +13,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Calendar, FileText, CheckCircle, XCircle, AlertTriangle, Eye, ShieldAlert } from 'lucide-react-native';
+import { ChevronLeft, Calendar, FileText, CheckCircle, XCircle, AlertTriangle, Eye, ShieldAlert, X } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../../src/api/client';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { EmployeeMetaCard } from '../../src/components/EmployeeMetaCard';
@@ -275,7 +275,7 @@ export default function ComplaintDetailScreen() {
                 <View className="px-6 py-4 flex-row items-center border-b border-neutral-100 bg-white/70">
                     <TouchableOpacity
                         onPress={() => router.replace('/complaints')}
-                        className="p-2 -ml-2 rounded-full hover:bg-neutral-100"
+                        className="p-2 -ml-2 rounded-full active:bg-neutral-100"
                     >
                         <ChevronLeft size={24} color="#0F172A" strokeWidth={2.5} />
                     </TouchableOpacity>
@@ -415,7 +415,7 @@ export default function ComplaintDetailScreen() {
                                 <TouchableOpacity
                                     onPress={() => setActionModal({ action: 'reject', title: 'Reject Grievance' })}
                                     disabled={actionLoading}
-                                    className="flex-1 rounded-2xl border-2 border-rose-200 bg-white py-3.5 shadow-xs flex-row items-center justify-center gap-1.5"
+                                    className="flex-1 rounded-2xl border-2 border-rose-200 bg-white py-3.5 flex-row items-center justify-center gap-1.5"
                                 >
                                     <XCircle size={16} color="#E11D48" strokeWidth={2.5} />
                                     <Text className="text-xs font-black uppercase tracking-widest text-rose-600">Reject</Text>
@@ -424,7 +424,14 @@ export default function ComplaintDetailScreen() {
                                 <TouchableOpacity
                                     onPress={() => setActionModal({ action: 'approve', title: 'Approve Grievance' })}
                                     disabled={actionLoading}
-                                    className="flex-1 rounded-2xl bg-emerald-600 py-3.5 shadow-md shadow-emerald-200 flex-row items-center justify-center gap-1.5"
+                                    className="flex-1 rounded-2xl bg-emerald-600 py-3.5 flex-row items-center justify-center gap-1.5"
+                                    style={{
+                                        shadowColor: '#10B981',
+                                        shadowOffset: { width: 0, height: 4 },
+                                        shadowOpacity: 0.2,
+                                        shadowRadius: 6,
+                                        elevation: 6
+                                    }}
                                 >
                                     <CheckCircle size={16} color="#FFFFFF" strokeWidth={2.5} />
                                     <Text className="text-xs font-black uppercase tracking-widest text-white">Approve</Text>
@@ -436,7 +443,14 @@ export default function ComplaintDetailScreen() {
                             <TouchableOpacity
                                 onPress={handleCancelSubmit}
                                 disabled={actionLoading}
-                                className="flex-1 rounded-2xl bg-rose-600 py-4 shadow-md shadow-rose-200 flex-row items-center justify-center gap-1.5"
+                                className="flex-1 rounded-2xl bg-rose-600 py-4 flex-row items-center justify-center gap-1.5"
+                                style={{
+                                    shadowColor: '#E11D48',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.2,
+                                    shadowRadius: 6,
+                                    elevation: 6
+                                }}
                             >
                                 <XCircle size={16} color="#FFFFFF" strokeWidth={2.5} />
                                 <Text className="text-xs font-black uppercase tracking-widest text-white">Cancel Grievance</Text>
@@ -464,7 +478,7 @@ export default function ComplaintDetailScreen() {
                             onPress={() => setImagePreviewOpen(false)}
                             className="absolute top-14 right-6 h-10 w-10 items-center justify-center rounded-full bg-white/20"
                         >
-                            <ChevronLeft size={24} color="#FFFFFF" className="rotate-270" strokeWidth={3} />
+                            <X size={24} color="#FFFFFF" strokeWidth={2.5} />
                         </TouchableOpacity>
                         {complaint.imageUrl && (
                             <Image
