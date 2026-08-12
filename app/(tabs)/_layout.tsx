@@ -43,12 +43,14 @@ const MOBILE_FALLBACK_MODULES = [
     'PAYSLIPS',
     'OT_PERMISSIONS',
     'PROFILE',
+    'COMPLAINTS:read',
+    'COMPLAINTS:write',
 ];
-const EMPLOYEE_FALLBACK_MODULES = ['DASHBOARD', 'LEAVE_OD', 'ATTENDANCE', 'PROFILE', 'PAYSLIPS'];
+const EMPLOYEE_FALLBACK_MODULES = ['DASHBOARD', 'LEAVE_OD', 'ATTENDANCE', 'PROFILE', 'PAYSLIPS', 'COMPLAINTS:read', 'COMPLAINTS:write'];
 
 function fallbackFeatureControl(role?: string | null): string[] {
     const r = String(role || '').toLowerCase();
-    if (r === 'manager' || r === 'hr' || r === 'hod') return MOBILE_FALLBACK_MODULES;
+    if (r === 'manager' || r === 'hr' || r === 'hod' || r === 'super_admin' || r === 'sub_admin') return MOBILE_FALLBACK_MODULES;
     return EMPLOYEE_FALLBACK_MODULES;
 }
 
@@ -68,11 +70,6 @@ export default function TabLayout() {
         const resolveFeatureControl = async () => {
             if (!hydrated || !isAuthenticated || !user?.role) {
                 setResolvedFeatureControl(null);
-                return;
-            }
-
-            if (Array.isArray(user.featureControl) && user.featureControl.length > 0) {
-                setResolvedFeatureControl(user.featureControl);
                 return;
             }
 
@@ -97,9 +94,19 @@ export default function TabLayout() {
             }
 
             if (!cancelled) {
-                const fallback = fallbackFeatureControl(user.role);
-                setResolvedFeatureControl(fallback);
-                updateUser({ featureControl: fallback });
+                let currentFeatures = Array.isArray(user.featureControl) && user.featureControl.length > 0
+                    ? user.featureControl
+                    : fallbackFeatureControl(user.role);
+
+                const hasComplaints = currentFeatures.includes('COMPLAINTS') || 
+                                     currentFeatures.includes('COMPLAINTS:read') || 
+                                     currentFeatures.includes('COMPLAINTS:write');
+                if (!hasComplaints) {
+                    currentFeatures = [...currentFeatures, 'COMPLAINTS:read', 'COMPLAINTS:write'];
+                }
+
+                setResolvedFeatureControl(currentFeatures);
+                updateUser({ featureControl: currentFeatures });
             }
         };
 
@@ -198,7 +205,7 @@ export default function TabLayout() {
         {
             name: 'Complaints Hub',
             icon: AlertTriangle,
-            route: '/complaints',
+            route: '/(tabs)/complaints',
             show: canViewComplaintsModule(effectiveUser),
             color: '#EF4444',
             bg: '#FEF2F2',
@@ -356,6 +363,17 @@ export default function TabLayout() {
                         href: null,
                         tabBarIcon: ({ color, size }) => (
                             <Timer size={size} color={color} />
+                        ),
+                    }}
+                />
+
+                <Tabs.Screen
+                    name="complaints"
+                    options={{
+                        title: 'Complaints',
+                        href: null,
+                        tabBarIcon: ({ color, size }) => (
+                            <AlertTriangle size={size} color={color} />
                         ),
                     }}
                 />

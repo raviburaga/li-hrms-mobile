@@ -190,6 +190,7 @@ export const api = {
         designation_id?: string;
         employee_group_id?: string;
         includeLeft?: boolean;
+        ignoreScope?: string;
     }) => {
         const q = new URLSearchParams();
         if (params?.is_active != null) q.set('is_active', String(params.is_active));
@@ -201,6 +202,7 @@ export const api = {
         if (params?.designation_id) q.set('designation_id', params.designation_id);
         if (params?.employee_group_id) q.set('employee_group_id', params.employee_group_id);
         if (params?.includeLeft != null) q.set('includeLeft', String(params.includeLeft));
+        if (params?.ignoreScope) q.set('ignoreScope', params.ignoreScope);
         const qs = q.toString();
         return apiClient.get<ApiEnvelope>(`/employees${qs ? `?${qs}` : ''}`);
     },
@@ -738,11 +740,12 @@ export const api = {
         apiClient.get<ApiEnvelope>('/complaints/my'),
     getPendingComplaintApprovals: () =>
         apiClient.get<ApiEnvelope>('/complaints/pending-approvals'),
-    getComplaints: (params?: { status?: string; fromDate?: string; toDate?: string }) => {
+    getComplaints: (params?: { status?: string; fromDate?: string; toDate?: string; ignoreScope?: string }) => {
         const q = new URLSearchParams();
         if (params?.status) q.set('status', params.status);
         if (params?.fromDate) q.set('fromDate', params.fromDate);
         if (params?.toDate) q.set('toDate', params.toDate);
+        if (params?.ignoreScope) q.set('ignoreScope', params.ignoreScope);
         const qs = q.toString();
         return apiClient.get<ApiEnvelope>(`/complaints${qs ? `?${qs}` : ''}`);
     },

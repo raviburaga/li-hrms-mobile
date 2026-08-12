@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Camera, Image as ImageIcon, Trash2, Check, AlertCircle } from 'lucide-react-native';
+import { ChevronLeft, Camera, Image as ImageIcon, Trash2, Check, AlertCircle, X, Plus, ChevronDown } from 'lucide-react-native';
 import { api, ApiEnvelope } from '../src/api/client';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { canApplyComplaints, isManagementRole } from '../src/lib/permissions';
@@ -43,7 +43,58 @@ export default function ApplyComplaintScreen() {
     const [uploadLoading, setUploadLoading] = useState(false);
 
     const isManager = isManagementRole(user);
+    const isSuperAdmin = user?.role === 'super_admin';
     const selfEmpNo = String(user?.emp_no ?? '').trim().toUpperCase();
+
+    // Category Creation specific states
+    const [showAddCategory, setShowAddCategory] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [addingCategory, setAddingCategory] = useState(false);
+
+    const handleSaveCategory = async () => {
+        const name = newCategoryName.trim();
+        if (!name) {
+            Alert.alert('Required', 'Please enter a category name.');
+            return;
+        }
+        
+        setAddingCategory(true);
+        try {
+            // Generate unique uppercase code
+            const code = name.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+            const res = await api.addLeaveType('complaint', {
+                code,
+                name,
+                isActive: true,
+            });
+            const body = res.data as ApiEnvelope;
+            
+            if (res.status === 201 || body.success) {
+                // Refresh categories list
+                const st = await api.getLeaveTypes('complaint');
+                const envelope = st.data as ApiEnvelope<ComplaintTypeOpt[]>;
+                if (envelope.success && Array.isArray(envelope.data)) {
+                    setTypes(envelope.data.filter((t) => t.isActive !== false));
+                }
+                
+                // Select newly created category
+                setComplaintType(code);
+                
+                // Reset state & close modal
+                setNewCategoryName('');
+                setShowAddCategory(false);
+                setTypeModal(false);
+                Alert.alert('Success', `Category "${name}" added successfully.`);
+            } else {
+                Alert.alert('Failed', body.error || 'Failed to add category.');
+            }
+        } catch (err) {
+            console.error('Error adding category:', err);
+            Alert.alert('Error', 'Failed to add category due to server error.');
+        } finally {
+            setAddingCategory(false);
+        }
+    };
 
     // Permissions check
     const requestPhotoPermission = async () => {
@@ -219,7 +270,7 @@ export default function ApplyComplaintScreen() {
                 <View className="px-6 py-4 flex-row items-center border-b border-neutral-100 bg-white/70">
                     <TouchableOpacity
                         onPress={() => router.replace('/complaints')}
-                        className="p-2 -ml-2 rounded-full hover:bg-neutral-100"
+                        className="p-2 -ml-2 rounded-full active:bg-neutral-100"
                     >
                         <ChevronLeft size={24} color="#0F172A" strokeWidth={2.5} />
                     </TouchableOpacity>
@@ -237,26 +288,13 @@ export default function ApplyComplaintScreen() {
                     ) : (
                         <ScrollView className="flex-1 px-6 pt-4" showsVerticalScrollIndicator={false}>
                             
-                            {/* Target Employee selection (visible only for supervisors/HR/admins) */}
-                            {isManager ? (
-                                <SearchableEmployeeSelect
-                                    label="Target Employee"
-                                    selectedEmpNo={selectedEmployee?.emp_no || ''}
-                                    onSelect={(emp) => setSelectedEmployee(emp)}
-                                />
-                            ) : (
-                                <View className="mb-5 bg-neutral-50 border border-neutral-100 rounded-2xl p-4 flex-row items-center">
-                                    <View className="h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-800 mr-3">
-                                        <Text className="text-xs font-black uppercase">Self</Text>
-                                    </View>
-                                    <View>
-                                        <Text className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">Applying For</Text>
-                                        <Text className="text-sm font-black text-neutral-800 mt-0.5">
-                                            {selectedEmployee?.employee_name || user?.name || 'Loading...'}
-                                        </Text>
-                                    </View>
-                                </View>
-                            )}
+                            {/* Target Employee selection (any user with write access can search & choose any active employee) */}
+                            <SearchableEmployeeSelect
+                                label="Target Employee"
+                                selectedEmpNo={selectedEmployee?.emp_no || ''}
+                                onSelect={(emp) => setSelectedEmployee(emp)}
+                                ignoreScope={true}
+                            />
 
                             {/* Complaint Category Dropdown Selection */}
                             <Text className="text-neutral-500 text-[10px] font-black uppercase tracking-widest mb-2">
@@ -269,7 +307,7 @@ export default function ApplyComplaintScreen() {
                                 <Text className={`font-bold ${complaintType ? 'text-neutral-900' : 'text-neutral-400'}`}>
                                     {selectedTypeLabel}
                                 </Text>
-                                <ChevronLeft size={18} color="#94A3B8" className="rotate-270" />
+                                <ChevronDown size={18} color="#94A3B8" />
                             </TouchableOpacity>
 
                             {/* Remarks Text Input */}
@@ -284,7 +322,7 @@ export default function ApplyComplaintScreen() {
                                 placeholder="Provide description, relevant details, dates, or other information..."
                                 placeholderTextColor="#94A3B8"
                                 maxLength={1000}
-                                className="mb-5 rounded-2xl border-2 border-neutral-100 bg-white px-4 py-3.5 text-sm font-semibold text-neutral-800 text-top min-h-[140px]"
+                                className="mb-5 rounded-2xl border-2 border-neutral-100 bg-white px-4 py-3.5 text-sm font-semibold text-neutral-800 min-h-[140px]"
                                 style={{ textAlignVertical: 'top' }}
                             />
 
@@ -293,8 +331,8 @@ export default function ApplyComplaintScreen() {
                                 Attachment / Photo Evidence
                             </Text>
                             
-                            {evidence ? (
-                                <View className="mb-6 rounded-2xl border border-neutral-100 bg-white p-3 flex-row items-center justify-between shadow-xs">
+                             {evidence ? (
+                                <View className="mb-6 rounded-2xl border border-neutral-100 bg-white p-3 flex-row items-center justify-between">
                                     <View className="flex-row items-center">
                                         <Image
                                             source={{ uri: evidence.uri }}
@@ -340,7 +378,14 @@ export default function ApplyComplaintScreen() {
                             <TouchableOpacity
                                 onPress={onSubmit}
                                 disabled={submitting || uploadLoading}
-                                className="mb-12 rounded-2xl bg-rose-600 py-4 shadow-md shadow-rose-200 flex-row items-center justify-center"
+                                className="mb-12 rounded-2xl bg-rose-600 py-4 flex-row items-center justify-center"
+                                style={{
+                                    shadowColor: '#E11D48',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.2,
+                                    shadowRadius: 6,
+                                    elevation: 6
+                                }}
                             >
                                 {submitting || uploadLoading ? (
                                     <ActivityIndicator size="small" color="#FFFFFF" className="mr-2" />
@@ -361,12 +406,54 @@ export default function ApplyComplaintScreen() {
                             <View className="px-6 pt-6 pb-4 flex-row items-center justify-between border-b border-neutral-100">
                                 <Text className="text-base font-black uppercase tracking-widest text-neutral-900">Select Category</Text>
                                 <TouchableOpacity 
-                                    onPress={() => setTypeModal(false)}
-                                    className="p-1 rounded-full bg-neutral-100"
+                                    onPress={() => {
+                                        setTypeModal(false);
+                                        setShowAddCategory(false);
+                                        setNewCategoryName('');
+                                    }}
+                                    className="p-1.5 rounded-full bg-neutral-100"
                                 >
-                                    <ChevronLeft size={20} color="#0F172A" className="rotate-270" />
+                                    <X size={18} color="#0F172A" />
                                 </TouchableOpacity>
                             </View>
+
+                             {/* Option to add a category (available to all users) */}
+                             <View className="px-6 py-3 border-b border-neutral-100 bg-neutral-50/50">
+                                 {showAddCategory ? (
+                                     <View className="flex-row items-center gap-2">
+                                         <TextInput
+                                             value={newCategoryName}
+                                             onChangeText={setNewCategoryName}
+                                             placeholder="Enter new category name..."
+                                             placeholderTextColor="#94A3B8"
+                                             className="flex-1 h-11 bg-white rounded-xl px-4 text-xs font-semibold text-neutral-800 border border-neutral-200"
+                                             autoFocus
+                                         />
+                                         <TouchableOpacity
+                                             onPress={handleSaveCategory}
+                                             disabled={addingCategory}
+                                             className="h-11 px-4 bg-rose-600 rounded-xl items-center justify-center flex-row"
+                                         >
+                                             {addingCategory && <ActivityIndicator size="small" color="#FFF" className="mr-1" />}
+                                             <Text className="text-white text-[10px] font-black uppercase tracking-wider">Save</Text>
+                                         </TouchableOpacity>
+                                         <TouchableOpacity
+                                             onPress={() => { setShowAddCategory(false); setNewCategoryName(''); }}
+                                             className="h-11 px-3 bg-neutral-100 rounded-xl items-center justify-center"
+                                         >
+                                             <Text className="text-neutral-600 text-[10px] font-black uppercase tracking-wider">Cancel</Text>
+                                         </TouchableOpacity>
+                                     </View>
+                                 ) : (
+                                     <TouchableOpacity
+                                         onPress={() => setShowAddCategory(true)}
+                                         className="flex-row items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-rose-300 bg-rose-50/20"
+                                     >
+                                         <Plus size={14} color="#E11D48" strokeWidth={3} />
+                                         <Text className="text-[10px] font-black uppercase tracking-wider text-rose-600">Add New Category</Text>
+                                     </TouchableOpacity>
+                                 )}
+                             </View>
                             
                             <ScrollView className="px-6 py-2">
                                 {types.map((t) => {
