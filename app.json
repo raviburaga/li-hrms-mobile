@@ -74,7 +74,8 @@
           "color": "#10B981",
           "sounds": []
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {

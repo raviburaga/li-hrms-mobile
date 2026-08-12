@@ -31,8 +31,15 @@ import {
     stopOdLocationTrailBackground,
 } from '../../src/odTrail/odLocationTrailBackground';
 import { canRecordOdLocationTrail, hasOdInEvidenceSubmitted } from '../../src/odTrail/odTrailEligibility';
-import { publishOdTrailPointsSocket } from '../../src/odTrail/odTrailSocket';
 import { markOdTrackingActive } from '../../src/notifications/pushRegistration';
+import {
+    clearActiveOdTrailId,
+    clearOdTrailQueue,
+    enqueueOdTrailPoints,
+    syncPendingOdTrailPoints,
+} from '../../src/odTrail/odTrailQueue';
+import { enqueueOdOutSubmission } from '../../src/odTrail/odTrailQueue';
+import NetInfo from '@react-native-community/netinfo';
 
 type ChainStep = TimelineStep;
 
@@ -99,7 +106,7 @@ function parseExifGeo(row: Record<string, unknown> | null): { latitude: number; 
 
 function canSubmitOdOut(
     od: Record<string, unknown> | null,
-    user: { _id?: string; role?: string; employeeRef?: string; employeeId?: string; emp_no?: string } | null
+    user: { _id?: string; id?: string; role?: string; employeeRef?: string; employeeId?: string; emp_no?: string } | null
 ): boolean {
     if (!od || !user) return false;
     if (String(od.status) !== 'draft') return false;
@@ -143,6 +150,7 @@ function nodeName(v: unknown): string {
 export default function ODDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { user } = useAuthStore();
     const [loading, setLoading] = useState(true);
     const [row, setRow] = useState<Record<string, unknown> | null>(null);
     const [allowHigherAuthority, setAllowHigherAuthority] = useState(false);
@@ -158,7 +166,6 @@ export default function ODDetailScreen() {
     const [locatingOut, setLocatingOut] = useState(false);
     const [submittingOut, setSubmittingOut] = useState(false);
     const [trailUsesBackground, setTrailUsesBackground] = useState(false);
-    const { user } = useAuthStore();
     const rowRef = useRef(row);
     rowRef.current = row;
     const userRef = useRef(user);
@@ -203,7 +210,7 @@ export default function ODDetailScreen() {
         let sub: Location.LocationSubscription | null = null;
         let interval: ReturnType<typeof setInterval> | null = null;
 
-        const fgBuffer: Array<{ latitude: number; longitude: number; capturedAt: string; accuracy?: number | null }> = [];
+        const fgBuffer: Array<{ latitude: number; longitude: number; capturedAt: string; accuracy?: number }> = [];
         let fgLastLat: number | null = null;
         let fgLastLng: number | null = null;
         let fgLastSend = 0;
@@ -223,10 +230,8 @@ export default function ODDetailScreen() {
             if (fgBuffer.length === 0) return;
             const chunk = fgBuffer.splice(0, fgBuffer.length);
             try {
-                const pushedBySocket = await publishOdTrailPointsSocket(odId, chunk);
-                if (!pushedBySocket) {
-                    await api.appendODLocationTrail(odId, { points: chunk, client: 'mobile' });
-                }
+                await enqueueOdTrailPoints(odId, chunk);
+                await syncPendingOdTrailPoints();
                 setRow((prev) => {
                     if (!prev) return prev;
                     const merged = [
@@ -257,8 +262,10 @@ export default function ODDetailScreen() {
                         const lng = location.coords.longitude;
                         const now = Date.now();
                         let push = fgLastLat == null;
-                        if (!push && fgLastLng != null) {
-                            const dist = haversineM(fgLastLat, fgLastLng, lat, lng);
+                        const previousLat = fgLastLat;
+                        const previousLng = fgLastLng;
+                        if (!push && previousLat != null && previousLng != null) {
+                            const dist = haversineM(previousLat, previousLng, lat, lng);
                             if (dist >= 35 || now - fgLastSend >= 50000) push = true;
                         }
                         if (!push) return;
@@ -340,7 +347,7 @@ export default function ODDetailScreen() {
         user?.employeeRef,
         user?.emp_no,
         user?.email,
-        user?.employeeId,
+        (user as { employeeId?: string } | null)?.employeeId,
         load,
     ]);
 
@@ -492,6 +499,48 @@ export default function ODDetailScreen() {
                 onPress: async () => {
                     setSubmittingOut(true);
                     try {
+                        await stopOdLocationTrailBackground();
+                        const trailSync = await syncPendingOdTrailPoints();
+                        if (!trailSync.success) {
+                            Alert.alert(
+                                'Offline trail pending',
+                                `Connect to the internet before submitting OD OUT. ${trailSync.remaining} route point(s) are still waiting to upload.`
+                            );
+                            if (canRecordOdLocationTrail(row, user)) await startOdLocationTrailBackground(String(id));
+                            return;
+                        }
+                        // Check network first
+                        const net = await NetInfo.fetch();
+                        if (!net.isConnected || net.isInternetReachable === false) {
+                            // Offer to save offline
+                            Alert.alert('Offline', 'No internet connection. Save OD OUT and upload later?', [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Save offline',
+                                    onPress: async () => {
+                                        try {
+                                            await enqueueOdOutSubmission(String(id), {
+                                                photoUri: outEvidence.uri,
+                                                photoMime: outEvidence.mimeType || null,
+                                                photoName: outEvidence.fileName || null,
+                                                latitude: outLocationData.latitude,
+                                                longitude: outLocationData.longitude,
+                                                capturedAt: outLocationData.capturedAt,
+                                                notes: null,
+                                                owner: user?.id || null,
+                                            });
+                                            Alert.alert('Saved', 'OD OUT saved and will be uploaded when online.');
+                                            setOutEvidence(null);
+                                            setOutLocationData(null);
+                                        } catch (e) {
+                                            Alert.alert('Error', e instanceof Error ? e.message : 'Could not save offline');
+                                        }
+                                    },
+                                },
+                            ]);
+                            return;
+                        }
+
                         const uploadRes = await api.uploadEvidence({
                             uri: outEvidence.uri,
                             mimeType: outEvidence.mimeType,
@@ -505,7 +554,32 @@ export default function ODDetailScreen() {
                         const photoUrl = raw.url || raw.data?.url;
                         const photoKey = raw.key || raw.data?.key;
                         if (raw.success === false || !photoUrl) {
-                            Alert.alert('Upload', raw.message || raw.error || 'Could not upload photo');
+                            // Offer to save offline on upload failure
+                            Alert.alert('Upload failed', raw.message || raw.error || 'Could not upload photo. Save offline?', [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Save offline',
+                                    onPress: async () => {
+                                        try {
+                                            await enqueueOdOutSubmission(String(id), {
+                                                photoUri: outEvidence.uri,
+                                                photoMime: outEvidence.mimeType || null,
+                                                photoName: outEvidence.fileName || null,
+                                                latitude: outLocationData.latitude,
+                                                longitude: outLocationData.longitude,
+                                                capturedAt: outLocationData.capturedAt,
+                                                notes: null,
+                                                owner: user?.id || null,
+                                            });
+                                            Alert.alert('Saved', 'OD OUT saved and will be uploaded when online.');
+                                            setOutEvidence(null);
+                                            setOutLocationData(null);
+                                        } catch (e) {
+                                            Alert.alert('Error', e instanceof Error ? e.message : 'Could not save offline');
+                                        }
+                                    },
+                                },
+                            ]);
                             return;
                         }
                         const endEvidence = {
@@ -531,9 +605,11 @@ export default function ODDetailScreen() {
                             await load();
                         } else {
                             Alert.alert('Failed', body.message || body.error || 'Could not submit OD OUT');
+                            if (canRecordOdLocationTrail(row, user)) await startOdLocationTrailBackground(String(id));
                         }
                     } catch (e) {
                         Alert.alert('Error', e instanceof Error ? e.message : 'Network error');
+                        if (canRecordOdLocationTrail(row, user)) await startOdLocationTrailBackground(String(id));
                     } finally {
                         setSubmittingOut(false);
                     }
@@ -554,6 +630,8 @@ export default function ODDetailScreen() {
                         const body = res.data as ApiEnvelope;
                         if (body.success) {
                             await stopOdLocationTrailBackground();
+                            await clearOdTrailQueue(String(id));
+                            await clearActiveOdTrailId();
                             setTrailUsesBackground(false);
                             Alert.alert('Done', 'OD request withdrawn.');
                             router.back();

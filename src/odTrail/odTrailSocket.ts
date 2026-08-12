@@ -1,6 +1,7 @@
 import { getAppSocket } from '../lib/appSocket';
 
 type TrailPoint = {
+    pointId?: string;
     latitude: number;
     longitude: number;
     capturedAt?: string;

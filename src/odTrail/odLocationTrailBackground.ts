@@ -1,36 +1,31 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { api } from '../api/client';
-import { useAuthStore } from '../store/useAuthStore';
-import { publishOdTrailPointsSocket } from './odTrailSocket';
 import { markOdTrackingActive, markOdTrackingInactive } from '../notifications/pushRegistration';
 import { canRecordOdLocationTrail, type OdTrailUser } from './odTrailEligibility';
+import {
+    clearActiveOdTrailId,
+    clearOdTrailQueue,
+    enqueueOdTrailPoints,
+    getActiveOdTrailIdFromQueue,
+    getPendingOdTrailCount,
+    setActiveOdTrailId,
+    syncPendingOdTrailPoints,
+} from './odTrailQueue';
 
 export const OD_LOCATION_TRAIL_TASK = 'OD_LOCATION_TRAIL_TASK';
 
-const OD_TRAIL_OD_ID_KEY = '@lihrms/od_trail_active_od_id';
-
 export async function getActiveOdTrailId(): Promise<string | null> {
-    try {
-        return await AsyncStorage.getItem(OD_TRAIL_OD_ID_KEY);
-    } catch {
-        return null;
-    }
+    return getActiveOdTrailIdFromQueue();
 }
 
 let lastLat: number | null = null;
 let lastLng: number | null = null;
 let lastSend = 0;
-const buffer: Array<{ latitude: number; longitude: number; capturedAt: string; accuracy?: number }> = [];
-let lastUploadAt = 0;
-
 function resetTrailThrottle() {
     lastLat = null;
     lastLng = null;
     lastSend = 0;
-    buffer.length = 0;
-    lastUploadAt = 0;
 }
 
 function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -44,67 +39,29 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-async function getTokenForTrail(): Promise<string | null> {
-    const fromStore = useAuthStore.getState().token;
-    if (fromStore) return fromStore;
-    try {
-        const raw = await AsyncStorage.getItem('auth-storage');
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as { state?: { token?: string | null } };
-        return parsed?.state?.token ?? null;
-    } catch {
-        return null;
-    }
-}
-
-async function postTrailChunk(odId: string, chunk: typeof buffer) {
-    if (chunk.length === 0) return;
-    const token = await getTokenForTrail();
-    if (!token) return;
-    try {
-        const pushedBySocket = await publishOdTrailPointsSocket(odId, chunk);
-        if (!pushedBySocket) {
-            await api.appendODLocationTrail(odId, { points: chunk, client: 'mobile' });
-        }
-        lastUploadAt = Date.now();
-    } catch {
-        /* network / 403 — drop chunk to avoid unbounded growth */
-    }
-}
-
 /** Upload any buffered points (call before stopping task or switching OD). */
 export async function flushPendingOdTrailPoints(): Promise<void> {
-    const odId = await getActiveOdId();
-    if (!odId || buffer.length === 0) return;
-    const chunk = buffer.splice(0, buffer.length);
-    await postTrailChunk(odId, chunk);
+    await syncPendingOdTrailPoints();
 }
 
 async function getActiveOdId(): Promise<string | null> {
-    try {
-        return await AsyncStorage.getItem(OD_TRAIL_OD_ID_KEY);
-    } catch {
-        return null;
-    }
+    return getActiveOdTrailIdFromQueue();
 }
 
-function pushLocationSample(lat: number, lng: number, accuracy?: number | null) {
+function shouldStoreLocationSample(lat: number, lng: number) {
     const now = Date.now();
     let push = lastLat == null;
-    if (!push && lastLng != null) {
-        const dist = haversineM(lastLat, lastLng, lat, lng);
+    const previousLat = lastLat;
+    const previousLng = lastLng;
+    if (!push && previousLat != null && previousLng != null) {
+        const dist = haversineM(previousLat, previousLng, lat, lng);
         if (dist >= 35 || now - lastSend >= 50000) push = true;
     }
-    if (!push) return;
+    if (!push) return false;
     lastLat = lat;
     lastLng = lng;
     lastSend = now;
-    buffer.push({
-        latitude: lat,
-        longitude: lng,
-        capturedAt: new Date().toISOString(),
-        accuracy: accuracy ?? undefined,
-    });
+    return true;
 }
 
 TaskManager.defineTask(OD_LOCATION_TRAIL_TASK, async ({ data, error }) => {
@@ -116,22 +73,22 @@ TaskManager.defineTask(OD_LOCATION_TRAIL_TASK, async ({ data, error }) => {
     const odId = await getActiveOdId();
     if (!odId) return;
 
+    const points = [];
     for (const loc of locations) {
         const lat = loc.coords.latitude;
         const lng = loc.coords.longitude;
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-        pushLocationSample(lat, lng, loc.coords.accuracy);
+        if (!shouldStoreLocationSample(lat, lng)) continue;
+        points.push({
+            latitude: lat,
+            longitude: lng,
+            capturedAt: new Date().toISOString(),
+            accuracy: loc.coords.accuracy ?? undefined,
+            source: 'mobile' as const,
+        });
     }
-
-    // Live-ish uploads: flush smaller batches and also time-based.
-    // Note: background tasks run only when OS delivers locations; this makes uploads more frequent when we do wake.
-    const now = Date.now();
-    const TIME_FLUSH_MS = 25_000;
-    const BATCH_FLUSH = 6;
-    if (buffer.length >= BATCH_FLUSH || (buffer.length > 0 && now - lastUploadAt >= TIME_FLUSH_MS)) {
-        const chunk = buffer.splice(0, buffer.length);
-        await postTrailChunk(odId, chunk);
-    }
+    await enqueueOdTrailPoints(odId, points);
+    await syncPendingOdTrailPoints();
 });
 
 /**
@@ -147,7 +104,7 @@ export async function startOdLocationTrailBackground(odId: string): Promise<bool
 
     await stopOdLocationTrailBackground();
 
-    await AsyncStorage.setItem(OD_TRAIL_OD_ID_KEY, odId);
+    await setActiveOdTrailId(odId);
 
     try {
         await Location.startLocationUpdatesAsync(OD_LOCATION_TRAIL_TASK, {
@@ -165,7 +122,6 @@ export async function startOdLocationTrailBackground(odId: string): Promise<bool
         });
         await markOdTrackingActive(odId);
     } catch {
-        await AsyncStorage.removeItem(OD_TRAIL_OD_ID_KEY);
         return false;
     }
     return true;
@@ -173,11 +129,13 @@ export async function startOdLocationTrailBackground(odId: string): Promise<bool
 
 export async function stopOdLocationTrailBackground(): Promise<void> {
     await markOdTrackingInactive();
-    await flushPendingOdTrailPoints();
-    try {
-        await AsyncStorage.removeItem(OD_TRAIL_OD_ID_KEY);
-    } catch {
-        /* ignore */
+    const odId = await getActiveOdId();
+    if (odId) {
+        await flushPendingOdTrailPoints();
+        if ((await getPendingOdTrailCount(odId)) === 0) {
+            await clearOdTrailQueue(odId);
+            await clearActiveOdTrailId();
+        }
     }
     resetTrailThrottle();
     try {

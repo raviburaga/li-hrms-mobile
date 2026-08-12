@@ -415,6 +415,7 @@ export const api = {
         id: string,
         body: {
             points: Array<{
+                pointId?: string;
                 latitude: number;
                 longitude: number;
                 capturedAt?: string;

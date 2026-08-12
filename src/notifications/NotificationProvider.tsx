@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { getAppSocket, disconnectAppSocket } from '../lib/appSocket';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAuthPersistHydrated } from '../hooks/useAuthPersistHydrated';
@@ -17,6 +18,7 @@ import { openNotificationTarget } from './notificationNavigation';
 import { isNativePushAvailable, loadNotificationsModule } from './pushEnvironment';
 import { showAppToast } from '../ui/toast';
 import { ensureOdLocationTrailResumed } from '../odTrail/odLocationTrailBackground';
+import { syncPendingOdTrailPoints, syncPendingOdOutSubmissions } from '../odTrail/odTrailQueue';
 
 function asInAppNotification(payload: unknown): InAppNotification | null {
     if (!payload || typeof payload !== 'object') return null;
@@ -55,6 +57,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             if (next === 'active' && isAuthenticated) {
                 void refreshUnreadCount();
                 void ensureOdLocationTrailResumed(user);
+                void syncPendingOdTrailPoints();
+                void syncPendingOdOutSubmissions();
             }
         });
         return () => sub.remove();
@@ -74,7 +78,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             await refreshUnreadCount();
             await registerExpoPushToken();
             await ensureOdLocationTrailResumed(user);
+                await syncPendingOdTrailPoints();
+                await syncPendingOdOutSubmissions();
         })();
+
+        const networkSub = NetInfo.addEventListener((state) => {
+            if (state.isConnected && state.isInternetReachable !== false) {
+                void syncPendingOdTrailPoints();
+                void syncPendingOdOutSubmissions();
+            }
+        });
 
         const socket = getAppSocket();
         if (!socket) return undefined;
@@ -121,6 +134,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         socket.on('toast_notification', onToast);
 
         return () => {
+            networkSub();
             socket.off('in_app_notification', onInApp);
             socket.off('notification_unread_count', onUnread);
             socket.off('toast_notification', onToast);

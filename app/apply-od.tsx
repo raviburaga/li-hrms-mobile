@@ -309,7 +309,7 @@ export default function ApplyODScreen() {
             const res = await api.applyOD(payload);
             const body = res.data as ApiEnvelope & { data?: Record<string, unknown> };
             if (body.success) {
-                const od = body.data;
+                const od = body.data ?? null;
                 const odId = od?._id != null ? String(od._id) : '';
                 let bgTrailStarted = false;
                 if (odId && canRecordOdLocationTrail(od, user)) {
