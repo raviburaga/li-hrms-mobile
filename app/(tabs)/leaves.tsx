@@ -341,8 +341,8 @@ export default function LeavesScreen() {
                         </View>
                         <TouchableOpacity
                             onPress={() => setActionOpen(true)}
-                            className="w-14 h-14 bg-primary rounded-2xl items-center justify-center shadow-lg shadow-primary/30"
-                            disabled={scopeMode === 'team' || !canApply}
+                            className={`w-14 h-14 bg-primary rounded-2xl items-center justify-center shadow-lg shadow-primary/30 ${!canApply ? 'opacity-40' : ''}`}
+                            disabled={!canApply}
                         >
                             <Plus size={28} color="white" strokeWidth={3} />
                         </TouchableOpacity>
