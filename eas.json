@@ -11,6 +11,7 @@
         "distribution": "internal"
       },
       "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit1",
         "EXPO_PUBLIC_API_ORIGIN": "https://hrms-appi.raviburaga.shop"
       }
     },
@@ -21,6 +22,7 @@
         "simulator": true
       },
       "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit1",
         "EXPO_PUBLIC_API_ORIGIN": "https://hrms-appi.raviburaga.shop"
       }
     },
@@ -31,6 +33,7 @@
         "buildType": "apk"
       },
       "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit1",
         "EXPO_PUBLIC_API_ORIGIN": "http://103.140.18.28:5000"
       }
     },
@@ -40,11 +43,72 @@
         "buildType": "apk"
       },
       "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit1",
         "EXPO_PUBLIC_API_ORIGIN": "http://103.140.18.28:5000"
+      }
+    },
+    "unit2-development": {
+      "environment": "development",
+      "developmentClient": true,
+      "android": {
+        "distribution": "internal"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit2"
+      }
+    },
+    "unit2-preview": {
+      "distribution": "internal",
+      "channel": "preview-unit2",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit2"
+      }
+    },
+    "unit2-production": {
+      "channel": "production-unit2",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "unit2"
+      }
+    },
+    "pydah-development": {
+      "environment": "development",
+      "developmentClient": true,
+      "android": {
+        "distribution": "internal"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "pydah"
+      }
+    },
+    "pydah-preview": {
+      "distribution": "internal",
+      "channel": "preview-pydah",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "pydah"
+      }
+    },
+    "pydah-production": {
+      "channel": "production-pydah",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_VARIANT": "pydah"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "unit2-production": {},
+    "pydah-production": {}
   }
 }

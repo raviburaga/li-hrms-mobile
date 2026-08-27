@@ -78,6 +78,7 @@
       "expo-sqlite"
     ],
     "extra": {
+      "appVariant": "unit1",
       "eas": {
         "projectId": "a6df1916-5889-4ffa-a22f-ba617c936e61"
       }
